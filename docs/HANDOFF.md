@@ -8,6 +8,11 @@ Still **2D**. No deploy. No engine changes; shorting, EMA20 and the session P&L 
 - **Smooth chart motion** — each new print glides in over most of the tick interval (the line slides one slot left as the ring buffer rolls), the y-range widens fast and tightens slowly so prints never leave the frame, and a pulsing DOM dot marks the last price. Redraws only while a glide or range ease is in flight (`noteTick` / `chartAnimating` in `src/ui.js`). Respects `prefers-reduced-motion`.
 - **Phone layout** — at ≤640px the controls become one swipeable strip, stats go 3×2, chart then ticket come before the watch list, 16px inputs (no iOS zoom), larger tap targets, toasts drop from the top, hover styles gated behind `(hover: hover)`.
 - **Fixes** — `.news` panel styles leaked onto `.log-entry.news` rows (indented, padded log lines); negative money rendered as `$-12.34` (now `-$12.34`); the FLAT placeholder wrapped inside the positions grid; watch flashes tinted whole rows at 5× (now a price-text pulse).
+- **Design-recon follow-up** (Mobbin research: Fidelity, Stake, Revolut, Wealthsimple, Vivid, Lightyear, Wealthfront, QuestMobile on iOS; Gemini, Binance, OKX, Coinbase, Kraken on web):
+  - Phone pins BUY / SELL / SHORT / COVER to the bottom with a symbol · qty · type · P&L line (every mobile broker sampled pins trade actions; we keep all four because shorting is core).
+  - Chart draws your entry line (LONG/SHORT qty @ avg with live P&L) and a dashed line per working order; off-range levels pin to the edge with ▲/▼. This covers the "trade markers" roadmap item.
+  - O/H/L/C + EMA20 readout top-left (all five web terminals); crosshair price tag sits on the right axis.
+  - Deliberately skipped: edge-to-edge phone chart (keeps the bracketed frame) and Buy/Sell tabs (an extra tap per trade, and it fights B/S/H/C keys).
 - Screenshots in `docs/screenshots/`.
 
 ## Previous pass (overnight pass on 2.1)

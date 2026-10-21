@@ -80,6 +80,7 @@
       </div>
       <div id="chart-wrap">
         <canvas id="chart"></canvas>
+        <div class="chart-legend" id="chartLegend"></div>
         <i class="last-dot" id="lastDot"></i>
         <div class="crosshair" id="crosshair"></div>
       </div>
@@ -107,13 +108,16 @@
           <button data-qty="0.5">50%</button>
           <button data-qty="max">MAX</button>
         </div>
-        <div class="side-row">
-          <button class="buy-btn" id="buyBtn">BUY</button>
-          <button class="sell-btn" id="sellBtn">SELL</button>
-        </div>
-        <div class="side-row">
-          <button class="short-btn" id="shortBtn">SHORT</button>
-          <button class="cover-btn" id="coverBtn">COVER</button>
+        <div class="trade-bar" id="tradeBar">
+          <div class="bar-meta" id="barMeta"></div>
+          <div class="side-row">
+            <button class="buy-btn" id="buyBtn">BUY</button>
+            <button class="sell-btn" id="sellBtn">SELL</button>
+          </div>
+          <div class="side-row">
+            <button class="short-btn" id="shortBtn">SHORT</button>
+            <button class="cover-btn" id="coverBtn">COVER</button>
+          </div>
         </div>
         <div class="hint" id="maxBuy">MAX 0</div>
       </div>

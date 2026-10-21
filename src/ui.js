@@ -299,6 +299,8 @@
       ctx.font = '11px ui-monospace, monospace';
       ctx.fillText(stock.unlocked ? 'WAITING FOR PRINTS…' : 'SYMBOL LOCKED', 16, 28);
       dot.style.display = 'none';
+      $('chartLegend').innerHTML = '';
+      view.legend = '';
       view.settled = true;
       chartDirty = false;
       return;
@@ -452,6 +454,59 @@
     }
     ctx.restore();
 
+    // Entry + working-order lines: price under your short's line reads as winning at a glance.
+    const levels = [];
+    if (stock.holding && stock.avg) {
+      const pnl = stock.unrealizedCents / 100;
+      levels.push({
+        price: stock.avg,
+        color: style.getPropertyValue('--amber').trim() || '#ffc14a',
+        label: (stock.side === 'short' ? 'SHORT ' : 'LONG ') + String(Math.abs(stock.holding)) + ' @ ' + stock.avg.toFixed(2),
+        tail: (pnl >= 0 ? '+' : '') + money(pnl),
+        tailColor: pnl >= 0 ? up : down
+      });
+    }
+    state.orders.forEach((o) => {
+      if (o.symbol !== stock.symbol) return;
+      levels.push({
+        price: o.price,
+        color: o.side === 'buy' ? up : down,
+        label: o.type.toUpperCase() + ' ' + o.side.toUpperCase() + ' ' + o.qty,
+        dash: [6, 3]
+      });
+    });
+    levels.forEach((lv) => {
+      const raw = yOf(lv.price);
+      const off = raw < pad.t ? -1 : raw > h - pad.b ? 1 : 0;
+      const y = Math.round(clamp(raw, pad.t + 8, h - pad.b - 8)) + 0.5;
+      ctx.strokeStyle = lv.color;
+      ctx.globalAlpha = off ? 0.35 : 0.85;
+      ctx.setLineDash(lv.dash || [1, 0]);
+      ctx.lineWidth = 1;
+      if (!off) {
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(w - pad.r, y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.font = '700 9px ' + font;
+      const text = (off < 0 ? '▲ ' : off > 0 ? '▼ ' : '') + lv.label;
+      const tw = ctx.measureText(text).width;
+      const tailW = lv.tail ? ctx.measureText(lv.tail).width + 10 : 0;
+      ctx.fillStyle = lv.color;
+      ctx.fillRect(pad.l, y - 7, tw + 8, 14);
+      ctx.fillStyle = style.getPropertyValue('--bg').trim() || '#04110b';
+      ctx.fillText(text, pad.l + 4, y + 3);
+      if (lv.tail) {
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(pad.l + tw + 8, y - 7, tailW, 14);
+        ctx.fillStyle = lv.tailColor;
+        ctx.fillText(lv.tail, pad.l + tw + 13, y + 3);
+      }
+    });
+
     const shownPx = candleMode ? last : shownLast;
     const ly = Math.round(yOf(shownPx)) + 0.5;
     ctx.setLineDash([2, 4]);
@@ -473,6 +528,19 @@
     ctx.fillStyle = style.getPropertyValue('--bg').trim() || '#04110b';
     ctx.font = '700 11px ' + font;
     ctx.fillText(shownPx.toFixed(2), w - pad.r + 5, ly + 4);
+
+    const lc = stock.liveCandle;
+    const emaLast = stock.ema && stock.ema.length ? stock.ema[stock.ema.length - 1] : null;
+    const legend =
+      '<span>' + stock.symbol + '</span>' +
+      (lc
+        ? '<span>O<b>' + lc.o.toFixed(2) + '</b></span><span>H<b>' + lc.h.toFixed(2) + '</b></span><span>L<b>' + lc.l.toFixed(2) + '</b></span><span>C<b>' + lc.c.toFixed(2) + '</b></span>'
+        : '') +
+      (showEma && emaLast != null ? '<span class="ema">EMA20<b>' + emaLast.toFixed(2) + '</b></span>' : '');
+    if (view.legend !== legend) {
+      $('chartLegend').innerHTML = legend;
+      view.legend = legend;
+    }
 
     if (!candleMode) {
       dot.style.display = 'block';
@@ -500,7 +568,8 @@
         ctx.setLineDash([]);
         ctx.globalAlpha = 1;
         tag.style.display = 'block';
-        tag.style.left = Math.min(x + 8, w - pad.r - 80) + 'px';
+        tag.style.left = w - pad.r + 1 + 'px';
+        tag.style.width = pad.r - 2 + 'px';
         tag.style.top = yOf(px) + 'px';
         tag.textContent = money(px);
       }
@@ -693,6 +762,9 @@
     $('sellBtn').disabled = !s.unlocked || closed || (maxSell <= 0 && maxShort <= 0);
     $('shortBtn').disabled = !s.unlocked || closed || maxShort <= 0 || (pos && pos.qty > 0);
     $('coverBtn').disabled = !s.unlocked || closed || maxCover + 1e-9 < (qty > 0 ? Math.min(qty, maxCover) : 0.0001) || maxCover <= 0;
+    $('barMeta').innerHTML = s.unlocked
+      ? '<span><b>' + s.symbol + '</b> ' + money(s.price) + '</span><span>QTY <b>' + (qty || 0) + '</b> · ' + $('orderType').value.toUpperCase() + (pos ? ' · <b class="' + clsDelta(pos.unrealizedCents) + '">' + money(pos.unrealizedCents / 100) + '</b>' : '') + '</span>'
+      : '<span>' + s.symbol + ' LOCKED</span>';
     const needLimit = $('orderType').value !== 'market';
     $('limitPx').disabled = !needLimit;
     if (!needLimit) $('limitPx').value = s.price.toFixed(2);
@@ -703,7 +775,7 @@
       if (ev.type === 'fill') {
         if (ev.side === 'buy') audio.buy();
         else audio.sell();
-        const rect = $('ticket').getBoundingClientRect();
+        const rect = $('tradeBar').getBoundingClientRect();
         burst(rect.left + rect.width / 2, rect.top + 20, ev.side === 'buy' || (ev.side === 'sell' && ev.price));
         const label = ev.openedShort
           ? 'FILL SHORT '
