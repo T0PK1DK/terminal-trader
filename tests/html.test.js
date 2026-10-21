@@ -51,3 +51,18 @@ test('engine ships as a dual browser/node module', () => {
   assert.match(src, /root\.TerminalTrader/);
   assert.match(src, /createRing/);
 });
+
+test('desk polish: phone layout, reduced motion, and eased chart stay wired', () => {
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'css/desk.css'), 'utf8');
+  const ui = fs.readFileSync(path.join(root, 'src/ui.js'), 'utf8');
+  assert.match(html, /name="viewport"[^>]*width=device-width/);
+  assert.match(html, /id="lastDot"/);
+  assert.match(css, /@media \(max-width: 640px\)/);
+  assert.match(css, /prefers-reduced-motion: reduce/);
+  assert.match(css, /@media \(hover: hover\)/);
+  assert.match(ui, /function noteTick\(/);
+  assert.match(ui, /prefers-reduced-motion/);
+  // .news styles must not leak onto .log-entry.news rows
+  assert.ok(!/^\.news\b/m.test(css), 'scope news panel styles to .panel.news');
+});

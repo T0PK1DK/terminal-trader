@@ -2,9 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>TERMINAL TRADER</title>
   <meta name="description" content="2D simulated trading desk. Phosphor terminal, live tape, and juice. Simulated money only.">
+  <meta name="theme-color" content="#030605">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&display=swap">
   <link rel="stylesheet" href="css/desk.css">
 </head>
 <body>
@@ -24,25 +28,31 @@
         <div class="bar" style="margin-top:6px"><i id="goalFill"></i></div>
       </div>
       <div class="controls">
-        <button data-speed="1" class="active">1X</button>
-        <button data-speed="2">2X</button>
-        <button data-speed="5">5X</button>
-        <button id="pauseBtn">PAUSE</button>
-        <button id="muteBtn">MUTE</button>
-        <button data-theme="phosphor">PHOS</button>
-        <button data-theme="amber">AMBER</button>
-        <button data-theme="ice">ICE</button>
-        <button id="helpBtn">HELP</button>
-        <button id="pnlBtn">P&L</button>
-        <button id="boardBtn">BOARD</button>
-        <button id="resetBtn">RESET</button>
+        <div class="seg" role="group" aria-label="Speed">
+          <button data-speed="1" class="active">1X</button>
+          <button data-speed="2">2X</button>
+          <button data-speed="5">5X</button>
+          <button id="pauseBtn">PAUSE</button>
+        </div>
+        <div class="seg" role="group" aria-label="Theme">
+          <button data-theme="phosphor">PHOS</button>
+          <button data-theme="amber">AMBER</button>
+          <button data-theme="ice">ICE</button>
+        </div>
+        <div class="seg" role="group" aria-label="Desk">
+          <button id="pnlBtn">P&L</button>
+          <button id="boardBtn">BOARD</button>
+          <button id="helpBtn">HELP</button>
+          <button id="muteBtn">MUTE</button>
+          <button id="resetBtn">RESET</button>
+        </div>
         <label class="crt-ctl" title="Scanline intensity">CRT <input id="crtSlider" type="range" min="0" max="80" value="35" aria-label="CRT scan intensity"></label>
       </div>
     </div>
     <div class="stats">
-      <div class="stat"><label>CASH</label><b>$<span id="cash">10,000.00</span></b></div>
-      <div class="stat"><label>HOLDINGS</label><b>$<span id="holdings">0.00</span></b></div>
-      <div class="stat"><label>EQUITY</label><b>$<span id="total">10,000.00</span></b></div>
+      <div class="stat"><label>CASH</label><b><span id="cash">$10,000.00</span></b></div>
+      <div class="stat"><label>HOLDINGS</label><b><span id="holdings">$0.00</span></b></div>
+      <div class="stat"><label>EQUITY</label><b><span id="total">$10,000.00</span></b></div>
       <div class="stat"><label>SESSION</label><b id="pnl">+0.00%</b></div>
       <div class="stat"><label>DAY / RANK</label><b><span id="day">1</span> · <span id="rank">INTERN</span></b></div>
       <div class="stat" id="regimeStat"><label>REGIME</label><b id="regime">REGULAR HOURS</b></div>
@@ -70,6 +80,7 @@
       </div>
       <div id="chart-wrap">
         <canvas id="chart"></canvas>
+        <i class="last-dot" id="lastDot"></i>
         <div class="crosshair" id="crosshair"></div>
       </div>
       <div class="movers" id="movers"></div>

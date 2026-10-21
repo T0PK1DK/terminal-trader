@@ -1,6 +1,16 @@
 # Handoff
 
-## What shipped (overnight pass on 2.1)
+## What shipped (UI polish pass)
+
+Still **2D**. No deploy. No engine changes; shorting, EMA20 and the session P&L card behave as before.
+
+- **Sharper terminal look** — HUD corner brackets on panels, hairline stat strip, segmented control groups (speed / theme / desk), JetBrains Mono with monospace fallbacks, tabular numbers, blinking cursor on the mast and boot line.
+- **Smooth chart motion** — each new print glides in over most of the tick interval (the line slides one slot left as the ring buffer rolls), the y-range widens fast and tightens slowly so prints never leave the frame, and a pulsing DOM dot marks the last price. Redraws only while a glide or range ease is in flight (`noteTick` / `chartAnimating` in `src/ui.js`). Respects `prefers-reduced-motion`.
+- **Phone layout** — at ≤640px the controls become one swipeable strip, stats go 3×2, chart then ticket come before the watch list, 16px inputs (no iOS zoom), larger tap targets, toasts drop from the top, hover styles gated behind `(hover: hover)`.
+- **Fixes** — `.news` panel styles leaked onto `.log-entry.news` rows (indented, padded log lines); negative money rendered as `$-12.34` (now `-$12.34`); the FLAT placeholder wrapped inside the positions grid; watch flashes tinted whole rows at 5× (now a price-text pulse).
+- Screenshots in `docs/screenshots/`.
+
+## Previous pass (overnight pass on 2.1)
 
 Still **2D**. No deploy. No secrets. Simulated money only.
 
