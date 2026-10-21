@@ -12,7 +12,11 @@
   let chartSize = { w: 0, h: 0, dpr: 1 };
   let hover = null;
   let bootDone = false;
+  let showEma = true;
+  let fxSized = { w: 0, h: 0, dpr: 1 };
   const cardRefs = new Map();
+  const tapeRefs = { built: 0, nodes: [] };
+  const dirtyHash = { missions: '', book: '', news: '' };
   const tween = { cash: 10000, equity: 10000, hold: 0 };
   const particles = [];
 
@@ -68,12 +72,17 @@
     const canvas = $('fx');
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== innerWidth * dpr || canvas.height !== innerHeight * dpr) {
-      canvas.width = innerWidth * dpr;
-      canvas.height = innerHeight * dpr;
-      ctx.scale(dpr, dpr);
+    const cssW = window.innerWidth;
+    const cssH = window.innerHeight;
+    if (fxSized.w !== cssW || fxSized.h !== cssH || fxSized.dpr !== dpr) {
+      canvas.width = Math.max(1, Math.floor(cssW * dpr));
+      canvas.height = Math.max(1, Math.floor(cssH * dpr));
+      canvas.style.width = cssW + 'px';
+      canvas.style.height = cssH + 'px';
+      fxSized = { w: cssW, h: cssH, dpr };
     }
-    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.x += p.vx;
@@ -131,21 +140,26 @@
   }
 
   function drawSpark(canvas, history, up) {
+    const last = history && history.length ? history[history.length - 1] : 0;
+    if (canvas.dataset.last === String(last) && canvas.dataset.up === String(up)) return;
+    canvas.dataset.last = String(last);
+    canvas.dataset.up = String(up);
     const ctx = canvas.getContext('2d');
     const dpr = 2;
-    if (canvas.width !== 112) {
+    if (canvas.width !== 56 * dpr) {
       canvas.width = 56 * dpr;
       canvas.height = 22 * dpr;
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, 56, 22);
     if (!history || history.length < 2) return;
-    const min = Math.min.apply(null, history);
-    const max = Math.max.apply(null, history);
+    const slice = history.length > 24 ? history.slice(-24) : history;
+    const min = Math.min.apply(null, slice);
+    const max = Math.max.apply(null, slice);
     const range = max - min || 1;
     ctx.beginPath();
-    history.forEach((p, i) => {
-      const x = (i / (history.length - 1)) * 56;
+    slice.forEach((p, i) => {
+      const x = (i / (slice.length - 1)) * 56;
       const y = 20 - ((p - min) / range) * 18;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
@@ -168,31 +182,48 @@
       ref.px.textContent = s.unlocked ? money(s.price) : '••••';
       ref.chg.textContent = s.unlocked ? signed(s.pct, 2) + '%' : '—';
       ref.chg.className = 'chg ' + clsDelta(s.pct);
-      if (s.unlocked) drawSpark(ref.spark, s.history.slice(-24), s.pct >= 0);
+      if (s.unlocked) drawSpark(ref.spark, s.history, s.pct >= 0);
       if (s.unlocked && ref.lastPx != null && ref.lastPx !== s.price) {
         const flash = s.price >= ref.lastPx ? 'flash-up' : 'flash-down';
+        ref.row.classList.remove('flash-up', 'flash-down');
+        void ref.row.offsetWidth;
         ref.row.classList.add(flash);
-        setTimeout(() => ref.row.classList.remove(flash), 180);
       }
       ref.lastPx = s.price;
     });
   }
 
   function paintTape(state) {
-    const items = state.stocks
-      .filter((s) => s.unlocked)
-      .map((s) => {
-        const klass = s.pct >= 0 ? 'up' : 'down';
-        return '<span><b>' + s.symbol + '</b><span class="' + klass + '">' + money(s.price) + ' ' + signed(s.pct, 2) + '%</span></span>';
-      });
-    const html = items.join('') + items.join('');
+    const unlocked = state.stocks.filter((s) => s.unlocked);
     const tape = $('tape');
-    if (tape.dataset.hash !== String(items.length) + state.day) {
-      tape.innerHTML = html;
-      tape.dataset.hash = String(items.length) + state.day;
-    } else {
-      tape.innerHTML = html;
+    if (tapeRefs.built !== unlocked.length) {
+      tape.innerHTML = '';
+      tapeRefs.nodes = [];
+      const make = () =>
+        unlocked.map((s) => {
+          const wrap = document.createElement('span');
+          wrap.dataset.symbol = s.symbol;
+          const b = document.createElement('b');
+          b.textContent = s.symbol;
+          const px = document.createElement('span');
+          wrap.appendChild(b);
+          wrap.appendChild(px);
+          tape.appendChild(wrap);
+          return { wrap, px, symbol: s.symbol };
+        });
+      tapeRefs.nodes = make().concat(make());
+      tapeRefs.built = unlocked.length;
     }
+    const bySym = Object.create(null);
+    unlocked.forEach((s) => {
+      bySym[s.symbol] = s;
+    });
+    tapeRefs.nodes.forEach((node) => {
+      const s = bySym[node.symbol];
+      if (!s) return;
+      node.px.className = s.pct >= 0 ? 'up' : 'down';
+      node.px.textContent = money(s.price) + ' ' + signed(s.pct, 2) + '%';
+    });
   }
 
   function resizeChart() {
@@ -294,6 +325,22 @@
       ctx.fill();
     }
 
+    if (showEma && stock.ema && stock.ema.length > 1) {
+      ctx.beginPath();
+      stock.ema.forEach((p, i) => {
+        const x = pad.l + (i / (stock.ema.length - 1)) * innerW;
+        const y = yOf(p);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = style.getPropertyValue('--cyan').trim() || '#4de6ff';
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([3, 4]);
+      ctx.shadowBlur = 0;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     ctx.setLineDash([4, 4]);
     ctx.strokeStyle = color;
     ctx.beginPath();
@@ -303,7 +350,7 @@
     ctx.setLineDash([]);
     ctx.fillStyle = color;
     ctx.fillRect(w - pad.r + 6, yOf(last) - 8, 62, 16);
-    ctx.fillStyle = '#04110b';
+    ctx.fillStyle = style.getPropertyValue('--bg').trim() || '#04110b';
     ctx.font = '11px ui-monospace, monospace';
     ctx.fillText(last.toFixed(2), w - pad.r + 10, yOf(last) + 3);
 
@@ -375,7 +422,10 @@
     $('day').textContent = String(state.day);
     $('rank').textContent = state.rank.id;
     $('regime').textContent = state.regime.label;
+    const regimeStat = $('regimeStat');
+    if (regimeStat) regimeStat.dataset.regime = state.regime.id || '';
     $('goalFill').style.width = clamp((state.equity / 100000) * 100, 0, 100) + '%';
+    document.body.classList.toggle('is-paused', !!state.paused);
   }
 
   function paintLog(state) {
@@ -398,11 +448,18 @@
 
   function paintNews(state) {
     const el = $('news');
-    el.textContent = (state.news.hot ? 'BREAKING · ' : 'TAPE · ') + state.news.text;
+    const text = (state.news.hot ? 'BREAKING · ' : 'TAPE · ') + state.news.text;
+    if (dirtyHash.news !== text) {
+      el.textContent = text;
+      dirtyHash.news = text;
+    }
     el.classList.toggle('hot', state.news.hot);
   }
 
   function paintMissions(state) {
+    const hash = state.missions.map((m) => m.id + m.progress + m.done).join('|');
+    if (dirtyHash.missions === hash) return;
+    dirtyHash.missions = hash;
     $('missions').innerHTML = state.missions
       .map((m) => {
         const pct = clamp((m.progress / m.target) * 100, 0, 100);
@@ -421,11 +478,19 @@
   }
 
   function paintBook(state) {
+    const hash =
+      state.positions.map((p) => p.symbol + p.qty + p.unrealizedCents).join('|') +
+      '#' +
+      state.orders.map((o) => o.id + o.qty).join('|');
+    if (dirtyHash.book === hash) return;
+    dirtyHash.book = hash;
     $('positions').innerHTML = state.positions.length
       ? state.positions
           .map((p) => {
             return (
-              '<div class="pos"><b>' +
+              '<div class="pos' +
+              (p.side === 'short' ? ' short' : '') +
+              '"><b>' +
               p.symbol +
               '</b><span>' +
               p.qty +
@@ -479,9 +544,18 @@
     const s = selectedStock(state);
     const qty = Number($('qty').value);
     const max = game().maxBuyQty(s.symbol);
-    $('maxBuy').textContent = s.unlocked ? 'MAX ' + max + ' · CASH ' + money(state.cash) : 'LOCKED';
-    $('buyBtn').disabled = !s.unlocked || state.won || state.lost || max <= 0;
-    $('sellBtn').disabled = !s.unlocked || state.won || state.lost || !state.positions.some((p) => p.symbol === s.symbol && p.qty + 1e-9 >= (qty || 0.0001));
+    const maxShort = game().maxShortQty(s.symbol);
+    const maxCover = game().maxCoverQty(s.symbol);
+    const maxSell = game().maxSellQty(s.symbol);
+    const pos = state.positions.find((p) => p.symbol === s.symbol);
+    const closed = state.won || state.lost;
+    $('maxBuy').textContent = s.unlocked
+      ? 'MAX BUY ' + max + ' · SHORT ' + maxShort + ' · CASH ' + money(state.cash)
+      : 'LOCKED';
+    $('buyBtn').disabled = !s.unlocked || closed || max <= 0;
+    $('sellBtn').disabled = !s.unlocked || closed || (maxSell <= 0 && maxShort <= 0);
+    $('shortBtn').disabled = !s.unlocked || closed || maxShort <= 0 || (pos && pos.qty > 0);
+    $('coverBtn').disabled = !s.unlocked || closed || maxCover + 1e-9 < (qty > 0 ? Math.min(qty, maxCover) : 0.0001) || maxCover <= 0;
     const needLimit = $('orderType').value !== 'market';
     $('limitPx').disabled = !needLimit;
     if (!needLimit) $('limitPx').value = s.price.toFixed(2);
@@ -494,7 +568,14 @@
         else audio.sell();
         const rect = $('ticket').getBoundingClientRect();
         burst(rect.left + rect.width / 2, rect.top + 20, ev.side === 'buy' || (ev.side === 'sell' && ev.price));
-        toast((ev.side === 'buy' ? 'FILL BUY ' : 'FILL SELL ') + ev.qty + ' ' + ev.symbol);
+        const label = ev.openedShort
+          ? 'FILL SHORT '
+          : ev.covered
+            ? 'FILL COVER '
+            : ev.side === 'buy'
+              ? 'FILL BUY '
+              : 'FILL SELL ';
+        toast(label + ev.qty + ' ' + ev.symbol);
         chartDirty = true;
       } else if (ev.type === 'news') {
         audio.news();
@@ -543,6 +624,10 @@
     document.querySelectorAll('[data-speed]').forEach((btn) => {
       btn.classList.toggle('active', Number(btn.dataset.speed) === state.speed);
     });
+    const theme = document.documentElement.dataset.theme || 'phosphor';
+    document.querySelectorAll('[data-theme]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.theme === theme);
+    });
   }
 
   function loop() {
@@ -562,9 +647,47 @@
     const type = $('orderType').value;
     const qty = $('qty').value;
     const px = $('limitPx').value;
-    const result = side === 'buy' ? game().buy(qty, type, px) : game().sell(qty, type, px);
+    let result;
+    if (side === 'buy') result = game().buy(qty, type, px);
+    else if (side === 'sell') result = game().sell(qty, type, px);
+    else if (side === 'short') result = game().short(qty, type, px);
+    else result = game().cover(qty, type, px);
+    dirtyHash.book = '';
     paintAll(game().getState());
     if (!result.ok) toast(result.reason);
+  }
+
+  function pnlCardHtml(state) {
+    return (
+      '<div class="pnl-card">' +
+      '<div><label>EQUITY</label><b>' +
+      money(state.equity) +
+      '</b></div>' +
+      '<div><label>SESSION</label><b class="' +
+      clsDelta(state.sessionPct) +
+      '">' +
+      signed(state.sessionPct, 2) +
+      '%</b></div>' +
+      '<div><label>REALIZED</label><b class="' +
+      clsDelta(state.realized) +
+      '">' +
+      money(state.realized) +
+      '</b></div>' +
+      '<div><label>UNREALIZED</label><b class="' +
+      clsDelta(state.unrealized) +
+      '">' +
+      money(state.unrealized) +
+      '</b></div>' +
+      '<div><label>PEAK</label><b>' +
+      money(state.peakEquity) +
+      '</b></div>' +
+      '<div><label>FILLS / SHORTS</label><b>' +
+      state.fills +
+      ' · ' +
+      state.shortsOpened +
+      '</b></div>' +
+      '</div>'
+    );
   }
 
   function showModal(which) {
@@ -577,21 +700,41 @@
     if (which === 'win') {
       $('modalTitle').textContent = 'DESK CLEARED';
       $('modalBody').innerHTML =
-        '<p>Simulated book hit the $100,000 wire. No real money changed hands.</p><ol class="scores">' +
+        '<p>Simulated book hit the $100,000 wire. No real money changed hands.</p>' +
+        pnlCardHtml(state) +
+        '<ol class="scores">' +
         scores +
         '</ol>';
     } else if (which === 'lose') {
       $('modalTitle').textContent = 'MARGIN CALL';
-      $('modalBody').innerHTML = '<p>Simulated capital is gone. Reset the desk and try another tape.</p><ol class="scores">' + scores + '</ol>';
+      $('modalBody').innerHTML =
+        '<p>Simulated capital is gone. Reset the desk and try another tape.</p>' +
+        pnlCardHtml(state) +
+        '<ol class="scores">' +
+        scores +
+        '</ol>';
     } else if (which === 'help') {
       $('modalTitle').textContent = 'DESK MANUAL';
       $('modalBody').innerHTML =
         '<p>Simulated money only. Not financial advice.</p>' +
         '<ol><li>Click a name on the watch. Locked tickers unlock with rank.</li>' +
-        '<li>Market, limit, and stop tickets. Qty chips or type a size.</li>' +
+        '<li>Market, limit, and stop tickets. Qty chips, 25/50%, or type a size.</li>' +
+        '<li>SHORT a name to fade a rip. COVER buys the short back. Capacity is 1× equity.</li>' +
+        '<li>EMA20 sits on the chart. CRT slider tames the scanlines.</li>' +
         '<li>News shocks the tape. Ride it or fade it.</li>' +
-        '<li>Keys: SPACE pause · B buy · S sell · 1-6 watch · [ ] size</li>' +
+        '<li>Keys: SPACE pause · B buy · S sell · H short · C cover · 1-6 watch · [ ] size</li>' +
         '<li>Goal: grow the simulated book to $100,000. Wipe below $250.</li></ol>';
+    } else if (which === 'pnl') {
+      $('modalTitle').textContent = 'SESSION P&L';
+      $('modalBody').innerHTML =
+        pnlCardHtml(state) +
+        '<p>Day ' +
+        state.day +
+        ' · ' +
+        state.rank.title +
+        ' · ' +
+        state.regime.label +
+        '. Simulated money only.</p>';
     } else {
       $('modalTitle').textContent = 'LOCAL LEADERBOARD';
       $('modalBody').innerHTML = scores ? '<ol class="scores">' + scores + '</ol>' : '<p>No runs logged yet.</p>';
@@ -605,7 +748,13 @@
   function resetDesk() {
     gameHolder.current = game().reset();
     cardRefs.clear();
+    tapeRefs.built = 0;
+    tapeRefs.nodes = [];
+    dirtyHash.missions = '';
+    dirtyHash.book = '';
+    dirtyHash.news = '';
     $('watch').innerHTML = '';
+    $('tape').innerHTML = '';
     $('log').innerHTML = '';
     hideModal();
     paintAll(game().getState());
@@ -615,6 +764,8 @@
   function bind() {
     $('buyBtn').addEventListener('click', () => submit('buy'));
     $('sellBtn').addEventListener('click', () => submit('sell'));
+    $('shortBtn').addEventListener('click', () => submit('short'));
+    $('coverBtn').addEventListener('click', () => submit('cover'));
     $('stockSelect').addEventListener('change', (e) => {
       game().select(e.target.value);
       paintAll(game().getState());
@@ -623,8 +774,11 @@
     $('orderType').addEventListener('change', syncTicket);
     document.querySelectorAll('[data-qty]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        if (btn.dataset.qty === 'max') $('qty').value = String(game().maxBuyQty());
-        else $('qty').value = btn.dataset.qty;
+        const max = game().maxBuyQty();
+        if (btn.dataset.qty === 'max') $('qty').value = String(max);
+        else if (btn.dataset.qty === '0.25' || btn.dataset.qty === '0.5') {
+          $('qty').value = String(Math.max(0.0001, Math.round(max * Number(btn.dataset.qty) * 10000) / 10000));
+        } else $('qty').value = btn.dataset.qty;
         syncTicket();
       });
     });
@@ -647,18 +801,41 @@
         drawChart(game().getState());
       });
     });
+    $('emaBtn').addEventListener('click', () => {
+      showEma = !showEma;
+      $('emaBtn').classList.toggle('active', showEma);
+      chartDirty = true;
+      drawChart(game().getState());
+    });
     document.querySelectorAll('[data-theme]').forEach((btn) => {
       btn.addEventListener('click', () => {
         document.documentElement.dataset.theme = btn.dataset.theme;
         storage.setItem('terminal-trader-theme', btn.dataset.theme);
+        document.querySelectorAll('[data-theme]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.theme === btn.dataset.theme);
+        });
         chartDirty = true;
       });
     });
+    const crt = $('crtSlider');
+    const applyCrt = (value) => {
+      const n = clamp(Number(value) || 0, 0, 80);
+      document.body.style.setProperty('--scan', String(n / 100));
+      document.body.style.setProperty('--vignette', String(0.28 + n / 160));
+      storage.setItem('terminal-trader-crt', String(n));
+    };
+    crt.addEventListener('input', () => applyCrt(crt.value));
+    const savedCrt = storage.getItem('terminal-trader-crt');
+    if (savedCrt != null) {
+      crt.value = savedCrt;
+      applyCrt(savedCrt);
+    }
     $('muteBtn').addEventListener('click', () => {
       audio.setMuted(!audio.isMuted());
       $('muteBtn').textContent = audio.isMuted() ? 'SOUND' : 'MUTE';
     });
     $('helpBtn').addEventListener('click', () => showModal('help'));
+    $('pnlBtn').addEventListener('click', () => showModal('pnl'));
     $('boardBtn').addEventListener('click', () => showModal('board'));
     $('resetBtn').addEventListener('click', resetDesk);
     $('closeModal').addEventListener('click', hideModal);
@@ -685,6 +862,8 @@
         paintAll(game().getState());
       } else if (e.key === 'b' || e.key === 'B') submit('buy');
       else if (e.key === 's' || e.key === 'S') submit('sell');
+      else if (e.key === 'h' || e.key === 'H') submit('short');
+      else if (e.key === 'c' || e.key === 'C') submit('cover');
       else if (e.key === '[') {
         $('qty').value = String(Math.max(0.0001, Number($('qty').value || 1) / 2));
         syncTicket();

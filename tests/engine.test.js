@@ -15,6 +15,9 @@ const {
   tradeCostCents,
   rankForEquity,
   unlockedSet,
+  computeEma,
+  normalizeSignedQty,
+  EMA_PERIOD,
   STARTING_CASH,
   WIN_EQUITY,
   BANKRUPT_EQUITY,
@@ -48,6 +51,7 @@ test('rank ladder unlocks extra tape', () => {
   assert.equal(rankForEquity(10000).id, 'INTERN');
   assert.equal(rankForEquity(25000).id, 'JUNIOR');
   assert.equal(rankForEquity(50000).id, 'ANALYST');
+  assert.equal(rankForEquity(75000).id, 'VP');
   assert.equal(rankForEquity(100000).id, 'VP');
   assert.equal(rankForEquity(250000).id, 'PARTNER');
   assert.equal(unlockedSet('INTERN').has('AAPL'), true);
@@ -80,7 +84,7 @@ test('cannot buy without cash or sell without shares', () => {
   g.select('AAPL');
   const sell = g.sell(1);
   assert.equal(sell.ok, false);
-  assert.match(sell.reason, /shares/i);
+  assert.match(sell.reason, /shares|capacity|short/i);
 });
 
 test('rejects invalid quantity and locked symbols', () => {
@@ -307,4 +311,118 @@ test('starting cash default matches the public goal', () => {
   const g = createGame({ rng: () => 0.5, newsChance: 0, regimeChance: 0 });
   assert.equal(g.getState().cash, STARTING_CASH);
   assert.equal(WIN_EQUITY, 100000);
+});
+
+test('signed qty helper and EMA-20', () => {
+  assert.equal(normalizeSignedQty(-1.23456), -1.2346);
+  assert.equal(normalizeSignedQty(0), 0);
+  assert.equal(EMA_PERIOD, 20);
+  const series = computeEma([10, 12, 14, 16], 3);
+  assert.equal(series.length, 4);
+  assert.equal(series[0], 10);
+  assert.ok(series[3] > series[0]);
+  assert.ok(series[3] < 16);
+});
+
+test('short opens a negative book and credits cash', () => {
+  const g = game();
+  const before = g.getState();
+  const result = g.short(2, 'market', null, 'AAPL');
+  assert.equal(result.ok, true);
+  assert.ok(result.openedShort > 0);
+  const after = g.getState();
+  assert.ok(after.cash > before.cash);
+  const pos = after.positions.find((p) => p.symbol === 'AAPL');
+  assert.ok(pos);
+  assert.equal(pos.qty, -2);
+  assert.equal(pos.side, 'short');
+  assert.ok(after.shortExposure > 0);
+});
+
+test('cover realizes short P&L and refuses when flat', () => {
+  const g = game();
+  const opened = g.short(3, 'market', null, 'TSLA');
+  assert.equal(opened.ok, true);
+  const mid = g.getState();
+  const covered = g.cover(3, 'market', null, 'TSLA');
+  assert.equal(covered.ok, true);
+  const after = g.getState();
+  assert.equal(after.positions.find((p) => p.symbol === 'TSLA'), undefined);
+  assert.ok(Math.abs(after.realized - (opened.price - covered.price) * 3) < 0.12);
+  assert.ok(after.cash < mid.cash);
+  assert.equal(g.cover(1, 'market', null, 'TSLA').ok, false);
+});
+
+test('short capacity is capped at 1x equity', () => {
+  const g = game({ startingCash: 400 });
+  const huge = g.short(50, 'market', null, 'AAPL');
+  assert.equal(huge.ok, false);
+  assert.match(huge.reason, /capacity/i);
+  const qty = g.maxShortQty('AAPL');
+  assert.ok(qty > 0);
+  const ok = g.short(qty, 'market', null, 'AAPL');
+  assert.equal(ok.ok, true);
+  assert.equal(g.short(qty, 'market', null, 'AAPL').ok, false);
+});
+
+test('must sell a long before an explicit short', () => {
+  const g = game();
+  assert.equal(g.buy(1, 'market', null, 'AMZN').ok, true);
+  const blocked = g.short(1, 'market', null, 'AMZN');
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.reason, /long/i);
+});
+
+test('working limit buy reserves cash so a second ticket cannot spend it', () => {
+  const g = game({ startingCash: 400 });
+  const px = g.stock('AAPL').price;
+  const first = g.buy(2, 'limit', px, 'AAPL');
+  assert.equal(first.ok, true);
+  assert.ok(g.getState().reservedCash > 0);
+  const second = g.buy(2, 'limit', px, 'AAPL');
+  assert.equal(second.ok, false);
+  assert.match(second.reason, /cash/i);
+  assert.equal(g.cancelOrder(first.order.id).ok, true);
+  assert.equal(g.getState().reservedCash, 0);
+  assert.equal(g.buy(2, 'limit', px, 'AAPL').ok, true);
+});
+
+test('failed working order is dropped instead of retrying forever', () => {
+  const g = game({ startingCash: 400 });
+  const px = g.stock('AAPL').price;
+  const placed = g.buy(1, 'stop', px, 'AAPL');
+  assert.equal(placed.ok, true);
+  g.stock('AAPL').price = px * 3;
+  g.tickMarket();
+  assert.equal(g.getState().orders.length, 0);
+});
+
+test('VP unlocks before the $100k win wire', () => {
+  const g = game({ startingCash: 76000, winEquity: WIN_EQUITY });
+  for (let i = 0; i < 3; i++) g.tickMarket();
+  const st = g.getState();
+  assert.equal(st.won, false);
+  assert.equal(st.rank.id, 'VP');
+  assert.equal(g.isUnlocked('BTC'), true);
+});
+
+test('short borrow fee hits holders of dividend names', () => {
+  const g = game();
+  g.short(15, 'market', null, 'XOM');
+  const cash = g.getState().cash;
+  for (let i = 0; i < TICKS_PER_DAY * 3; i++) g.tickMarket();
+  assert.ok(g.getState().cash < cash + 1);
+  const fees = g.getState().log.filter((row) => /BORROW FEE/.test(row.msg));
+  assert.ok(fees.length >= 1);
+});
+
+test('serialize restore keeps a short book', () => {
+  const g = game();
+  g.short(2, 'market', null, 'AAPL');
+  const blob = g.serialize();
+  const clone = game({ rng: mulberry32(1) });
+  assert.equal(clone.restore(blob), true);
+  const pos = clone.getState().positions.find((p) => p.symbol === 'AAPL');
+  assert.equal(pos.qty, -2);
+  assert.equal(pos.side, 'short');
 });

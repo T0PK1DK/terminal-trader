@@ -124,7 +124,10 @@ Production finance UIs that informed the 2D desk grid (watchlist + chart + ticke
 | Persistence | Stock Market Tycoon, STONKS-9800 | localStorage snapshot of desk + book |
 | Missions / awards | Tycoon loops, Stock Market Tycoon: Challenge | Rotating desk contracts with small simulated bonuses |
 | Win / wipe | RSX2 “millions or lose everything” | Equity goal + bankruptcy overlay |
-| CRT terminal desk | STONKS-9800, original prototype | 2D phosphor/amber/ice themes, scanlines, boot splash |
+| Short / cover | RSX2 “short the market and profit from crashes” | SHORT / COVER ticket, 1× equity cap, borrow fee on dividend names |
+| P&L card | Roblox Stock Market shareable P&L | Session P&L modal + same card on win / wipe |
+| EMA overlay | Day-trading sims, Coinbase / Gemini desks | Toggleable EMA20 on the chart |
+| CRT terminal desk | STONKS-9800, original prototype | 2D phosphor/amber/ice themes, optional CRT slider, boot splash |
 | Smooth charts | Day-trading sims, Phantom / Copilot | Canvas line + candles, volume, last-price ray, sparklines |
 | Juice | Trading-sim feedback write-ups | Flashes, toasts, ticks, beeps, fill bursts — still 2D |
 | Instant pause / save | STONKS-9800 reviews | Space to halt, autosave, no install |
