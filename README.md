@@ -1,108 +1,66 @@
 # TERMINAL TRADER
 
-Retro phosphor-green terminal-style stock market simulation trading game.
+2D phosphor trading desk. Simulated tape, simulated money, no brokerage, no 3D.
 
-Single self-contained HTML file (vanilla JS + CSS + Canvas). No dependencies, no build step. Open `index.html` in any browser.
+Open `index.html` in a browser, or serve the folder:
 
-## Quick Start
-
-1. Clone the repo
-2. Open `index.html` in a browser
-3. Trade. Reach $100,000 to win.
-
-## Current Features
-
-- Starting cash: $10,000
-- Goal: $100,000
-- 10 stocks with different volatilities and sectors (Tech, Auto, Crypto, Energy, Index, Retail)
-- Real-time price ticks (random walk + slight drift)
-- Price history sparkline chart (Canvas)
-- Buy / Sell with quantity input and max-buy calculation
-- Portfolio tracking (cash + holdings value)
-- Random news events that move individual stocks or sectors
-- Speed controls (1x / 2x / 5x) and pause
-- Trade log
-- Responsive + mobile-friendly
-- CRT scanline overlay
-
-## Stocks
-
-| Symbol | Name              | Sector  | Volatility |
-|--------|-------------------|---------|------------|
-| AAPL   | Apple Inc         | Tech    | Low        |
-| TSLA   | Tesla Inc         | Auto    | High       |
-| NVDA   | NVIDIA            | Tech    | Medium     |
-| AMZN   | Amazon            | Retail  | Medium     |
-| MSFT   | Microsoft         | Tech    | Low        |
-| GOOGL  | Alphabet          | Tech    | Medium     |
-| META   | Meta              | Tech    | Medium     |
-| BTC    | Bitcoin           | Crypto  | Very High  |
-| SPY    | S&P 500 ETF       | Index   | Low        |
-| XOM    | Exxon Mobil       | Energy  | Medium     |
-
-## Architecture (for Claude / next developer)
-
-Everything lives in one file: `index.html`.
-
-Key structures:
-
-```js
-const stocks = [ /* array of stock objects */ ];
-let portfolio = { cash: 10000, holdings: {} };
+```bash
+npm start
+# http://localhost:4173
 ```
 
-Stock object shape:
-```js
-{
-  symbol: 'AAPL',
-  name: 'Apple Inc',
-  price: 185.42,
-  base: 185,
-  volatility: 0.018,
-  history: [],
-  sector: 'Tech'
-}
+**Play link:** [PLAY-LINK-PLACEHOLDER](https://PLAY-LINK-PLACEHOLDER)
+
+**Repository:** https://github.com/T0PK1DK/terminal-trader
+
+## What you get
+
+- Trading-desk layout: scrolling tape, watchlist with sparklines, line/candle chart, ticket, positions, working orders
+- Simulated book starts at **$10,000**. Clear **$100,000**. Wipe under **$250**
+- Mean-reverting tape, news shocks, BULL / BEAR / CRASH / EARNINGS regimes
+- Market, limit, and stop orders; fractional size; max-buy; light slippage and trade impact
+- Cost basis, realized / unrealized P&L, occasional simulated dividends
+- Rank ladder (INTERN → PARTNER) that unlocks more names
+- Desk contracts, local leaderboard, autosave
+- CRT scanlines, phosphor / amber / ice themes, ticks, toasts, fill bursts
+- Keyboard: `SPACE` pause · `B` buy · `S` sell · `1–6` watch · `[` `]` size
+
+This is a game. Quotes are invented. Nothing here is a real market, a real order, or financial advice.
+
+## Tests
+
+```bash
+npm test
 ```
 
-Main loop:
-- `tickMarket()` runs on interval (speed-controlled)
-- Updates prices with random walk
-- Occasionally calls `triggerNews()`
-- Renders UI + chart
+CI runs the same command on every push (`.github/workflows/test.yml`).
 
-News events are data-driven in the `newsEvents` array. Easy to extend.
+## Layout
 
-Chart is a simple Canvas line + fill drawn in `drawChart()`.
+```
+index.html          desk shell
+css/desk.css        2D terminal chrome
+src/engine.js       market, book, ranks, persistence (Node + browser)
+src/ui.js           incremental DOM, chart, juice
+src/audio.js        WebAudio beeps
+tests/              engine + doc/html smoke tests
+docs/RESEARCH.md    comps and borrowed patterns
+docs/HANDOFF.md     what shipped and what is next
+```
 
-## Suggested Next Features (handoff)
+## Research
 
-Priority ideas for Claude to implement:
+Comparable Roblox stock games and other sims — and the exact features borrowed — live in [docs/RESEARCH.md](docs/RESEARCH.md).
 
-1. **Persistence** — save/load portfolio + day to localStorage
-2. **More stocks / sectors** — or user-addable symbols
-3. **Order types** — limit orders, stop losses
-4. **P&L tracking** — average cost basis, realized/unrealized gains
-5. **Sound** — subtle terminal beeps on trades / news
-6. **Win/lose conditions** — bankruptcy screen, high score
-7. **Dark/light phosphor themes** or color customization
-8. **Mobile polish** — larger touch targets, better layout
-9. **Export** — download trade history as CSV
-10. **Multiplayer / leaderboard** (optional, via simple backend or local only)
+Primary sources:
 
-## Design Notes
+- [RBLX Exchange](https://www.roblox.com/games/81340984854227/RBLX-Exchange)
+- [Roblox Stock Exchange 2](https://www.roblox.com/games/110527353762049/Roblox-Stock-Exchange-2)
+- [Roblox Stock Market](https://www.roblox.com/games/128687243784661/Roblox-Stock-Market)
+- [StockRise](https://www.roblox.com/games/6266940721/StockRise-Stock-Simulator)
+- [Stock Market Tycoon](https://www.roblox.com/games/119849505/Stock-Market-Tycoon)
+- [STONKS-9800](https://store.steampowered.com/app/1539140/STONKS9800_Stock_Market_Simulator/)
+- [Investopedia Simulator](https://www.investopedia.com/simulator/)
+- [Finder paper-trading roundup](https://www.finder.com/stock-trading/stock-trading-games)
 
-- Aesthetic: CRT terminal / phosphor green (inspired by retro trading terminals and ZONEZ-style projects)
-- Keep it single-file if possible so it stays easy to share
-- Prefer vanilla JS over frameworks
-- Prices never go below $0.01
-- News effects are multiplicative for simplicity
-
-## Running Locally
-
-Just open the HTML file. No server required.
-
-Optional: `python3 -m http.server` if you want to test from another device.
-
----
-
-Built as a quick playable prototype. Ready for extension.
+Do not copy those games' code or assets. This repo uses original art, copy, and a from-scratch engine.
