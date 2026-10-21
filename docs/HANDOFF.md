@@ -1,55 +1,47 @@
 # Handoff
 
-## What shipped
+## What shipped (overnight pass on 2.1)
 
-Terminal Trader is no longer a single-file prototype. The desk is still **2D** (HTML/CSS + Canvas). The market lives in `src/engine.js` so Node can test it without a browser.
+Still **2D**. No deploy. No secrets. Simulated money only.
 
-### Engine
+### Features
 
-- Seedable RNG, cents-accurate cash, fractional qty
-- Mean-reverting prices + regime drift/vol + decaying news shocks + trade impact
-- Ring-buffer ticks and OHLC candles (no unbounded `shift` on the hot path)
-- Market / limit / stop book, max-buy, slippage
-- Average cost, realized + unrealized P&L, simulated dividends
-- Ranks unlock extra symbols; win at $100k; wipe under $250 (once, then freeze)
-- Rotating desk contracts, localStorage snapshot + local leaderboard
-- Event stream for the UI (`fill`, `news`, `rank`, `win`, `lose`, …)
+- **Short / cover** — Roblox Stock Exchange 2 crash-side trades. Capacity is 1× equity. Explicit SHORT refuses while a long is open; COVER only buys the short back. Dividend names debit shorts (borrow fee).
+- **EMA20 + session P&L card** — cyan dashed overlay (toggleable). P&L modal shows equity, session %, realized / unrealized, peak, fills / shorts. Same card on win / wipe.
 
-### Desk / juice
+### Bugs closed
 
-- Watch / chart / ticket / tape / contracts / audit log
-- Line + candle chart, last-price ray, crosshair, sparklines, top movers
-- Incremental watchlist updates (no full innerHTML wipe of the book every tick)
-- Chart canvas resizes only when the box changes (`ResizeObserver`)
-- Number tween, flashes, toasts, particle bursts, WebAudio, boot splash
-- Phosphor / amber / ice themes, pause/speed, mute, help, reset
+- VP unlock was $100k, same as the win wire, so BTC/COIN were unplayable. VP is now $75k.
+- Working orders that failed to fill stayed on the book forever. They cancel once.
+- Limit / stop buys did not reserve cash. Second tickets could overspend.
+- Market buys could spend cash already reserved for a working buy.
+- Tape rebuilt `innerHTML` every tick (broke the scroll and burned layout).
+- Watch flashes spawned a `setTimeout` per print.
+- FX overlay canvas used device pixels as CSS size (particles drew in the wrong space).
+- Positions ignored shorts (`qty > 0`).
+- Theme buttons never showed the active phosphor / amber / ice state.
 
-### Bugs closed from the prototype
+### Perf / feel
 
-- Win toast no longer repeats every tick
-- Speed buttons no longer steal state from Pause
-- Qty cannot be `NaN` / negative
-- Chart no longer resets `canvas.width` on every tick (that flicker + layout tax is gone)
-- Watchlist is patched in place instead of rebuilt
-- BTC is tradable via fractional size after rank unlock (was unbuyable at $67k with $10k)
-- Prices stay ≥ $0.01 and mean-revert instead of random-walking to the moon
-- Session can bankrupt and stop the clock
+- Incremental tape nodes; sparklines skip a redraw when the last print is unchanged
+- Candle history is a ring buffer (no `shift` on the hot path)
+- Missions / book / news DOM patch only when the hash changes
+- CRT scanline slider (persisted), pause freezes the tape and the LIVE pip
+- 25% / 50% size chips, SHORT / COVER row, regime-colored stat, last-price tag uses the theme background
 
 ### Tests / CI
 
-- `npm test` — Node's built-in runner, no extra deps
-- GitHub Action `.github/workflows/test.yml`
-- HTML/docs smoke test forbids personal names in public text
+- `npm test` — 37 cases (was 27). Same GitHub Action.
+- New coverage: shorts, covers, capacity, cash reserve, dropped working orders, VP-before-win, EMA helper, borrow fee, short serialize.
 
 ## What is next
 
-1. **Hosted play link** — drop a GitHub Pages (or other static) URL into the README placeholder. Do not deploy from this agent pass.
-2. **Shorting / cover** — Roblox Stock Exchange 2 players expect crash-side trades.
-3. **Indicators** — VWAP or a 20-tick EMA on the chart.
-4. **CSV export** of the audit log.
-5. **Optional remote board** — only if someone wants more than `localStorage`.
-6. **Juice pass** — per-theme CRT warp slider (STONKS-9800 lesson: keep it optional and mild).
-7. **More contracts** — sector-hold streaks, news-fade challenges.
+1. **Hosted play link** — drop a GitHub Pages (or other static) URL into the README placeholder. Do not deploy from an agent pass unless asked.
+2. **CSV export** of the audit log.
+3. **More contracts** — sector-hold streaks, news-fade, hold-a-short-through-crash.
+4. **Optional remote board** — only if someone wants more than `localStorage`.
+5. **Stop-limit** as a fourth ticket type (keep cash in cents).
+6. **Juice** — trade markers on the chart; keep CRT optional and mild.
 
 ## Prompt for Claude
 
@@ -62,15 +54,18 @@ Read docs/RESEARCH.md and docs/HANDOFF.md first. Engine is src/engine.js
 (UMD: Node tests + browser). UI is src/ui.js + css/desk.css.
 
 Rules:
-- Keep cash in integer cents. Use normalizeQty / tradeCostCents.
+- Keep cash in integer cents. Use normalizeQty / normalizeSignedQty / tradeCostCents.
+- qty < 0 is a short. costCents is signed (negative on shorts). Equity = cash + mark.
+- Short capacity is 1× equity. Reserve cash on working buys; drop a working
+  order if the fill fails instead of retrying forever.
 - Simulation ticks and render stay decoupled (interval vs rAF).
-- Do not rebuild the whole watchlist DOM every tick.
+- Do not rebuild the whole watchlist or tape DOM every tick.
 - Do not set canvas.width except on resize.
 - Add or update tests in tests/engine.test.js for any engine change.
 - Run npm test before you commit.
 
-Pick one next item (shorting, EMA, CSV export, or a CRT slider),
-implement it, and open a PR with a screenshot of the desk.
+Pick one next item (CSV export, a new contract, stop-limit, or chart trade
+markers), implement it, and open a PR with a screenshot of the desk.
 ```
 
 ## Play / repo

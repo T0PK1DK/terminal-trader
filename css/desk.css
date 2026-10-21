@@ -15,6 +15,8 @@
   --shadow: 0 0 24px rgba(29, 255, 138, 0.16);
   --bezel: #0d1a16;
   --grid: rgba(29, 255, 138, 0.05);
+  --scan: 0.35;
+  --vignette: 0.55;
   --font: "IBM Plex Mono", "Share Tech Mono", ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
 }
 
@@ -79,7 +81,7 @@ body::before {
       transparent 3px
     );
   mix-blend-mode: multiply;
-  opacity: 0.55;
+  opacity: var(--scan);
 }
 
 body::after {
@@ -88,7 +90,7 @@ body::after {
   inset: 0;
   pointer-events: none;
   z-index: 81;
-  box-shadow: inset 0 0 180px rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 0 180px rgba(0, 0, 0, var(--vignette));
 }
 
 button, input, select {
@@ -116,6 +118,9 @@ button { cursor: pointer; }
   box-shadow: var(--shadow);
 }
 
+body.is-paused .tape { animation-play-state: paused; }
+body.is-paused .live i { animation: none; opacity: 0.35; }
+
 .tape {
   display: flex;
   gap: 28px;
@@ -123,6 +128,7 @@ button { cursor: pointer; }
   animation: tape 36s linear infinite;
   padding: 0 16px;
   min-width: 200%;
+  will-change: transform;
 }
 
 .tape span { color: var(--muted); }
@@ -303,8 +309,17 @@ button { cursor: pointer; }
 .watch-row .meta { color: var(--muted); font-size: 10px; }
 .watch-row .px { text-align: right; }
 .watch-row .chg { text-align: right; font-size: 11px; }
-.watch-row.flash-up { background: rgba(61, 255, 154, 0.18); }
-.watch-row.flash-down { background: rgba(255, 77, 109, 0.16); }
+.watch-row.flash-up { animation: flashUp 0.22s ease; }
+.watch-row.flash-down { animation: flashDown 0.22s ease; }
+
+@keyframes flashUp {
+  from { background: rgba(61, 255, 154, 0.28); }
+  to { background: transparent; }
+}
+@keyframes flashDown {
+  from { background: rgba(255, 77, 109, 0.24); }
+  to { background: transparent; }
+}
 
 .spark { width: 56px; height: 22px; display: block; }
 
@@ -375,12 +390,60 @@ button { cursor: pointer; }
 }
 
 .side-row, .type-row, .qty-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.side-row > button { flex: 1 1 40%; }
 
-.buy-btn { border-color: var(--up) !important; color: var(--up) !important; }
-.sell-btn { border-color: var(--down) !important; color: var(--down) !important; }
-.buy-btn:hover { background: var(--up) !important; color: #04110b !important; }
-.sell-btn:hover { background: var(--down) !important; color: #140308 !important; }
+.buy-btn, .cover-btn { border-color: var(--up) !important; color: var(--up) !important; }
+.sell-btn, .short-btn { border-color: var(--down) !important; color: var(--down) !important; }
+.buy-btn:hover, .cover-btn:hover { background: var(--up) !important; color: #04110b !important; }
+.sell-btn:hover, .short-btn:hover { background: var(--down) !important; color: #140308 !important; }
+.short-btn { letter-spacing: 0.12em; }
+.cover-btn { letter-spacing: 0.12em; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.crt-ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  border: 1px solid var(--line-dim);
+  padding: 0 8px;
+  min-height: 34px;
+}
+.crt-ctl input {
+  width: 72px;
+  accent-color: var(--line);
+}
+
+.pos.short b::after {
+  content: " SHORT";
+  color: var(--down);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.pnl-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.pnl-card div {
+  border: 1px solid var(--line-dim);
+  padding: 8px 10px;
+}
+.pnl-card label {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+.pnl-card b { font-size: 16px; }
+
+.stat[data-regime="BULL"] b { color: var(--up); }
+.stat[data-regime="BEAR"] b, .stat[data-regime="CRASH"] b { color: var(--down); }
+.stat[data-regime="EARNINGS"] b { color: var(--amber); }
 
 .hint { color: var(--muted); font-size: 11px; }
 .positions { max-height: 180px; overflow: auto; }

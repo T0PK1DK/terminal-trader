@@ -18,13 +18,15 @@
   const TICKS_PER_DAY = 40;
   const MAX_OPEN_ORDERS = 8;
   const MAX_LOG = 80;
-  const SAVE_VERSION = 2;
+  const SAVE_VERSION = 3;
+  const SHORT_LEVERAGE = 1;
+  const EMA_PERIOD = 20;
 
   const RANKS = [
     { id: 'INTERN', title: 'INTERN', minEquity: 0, unlocks: [] },
     { id: 'JUNIOR', title: 'JUNIOR', minEquity: 25000, unlocks: ['NVDA', 'GOOGL'] },
     { id: 'ANALYST', title: 'ANALYST', minEquity: 50000, unlocks: ['META', 'AMD'] },
-    { id: 'VP', title: 'VICE PRESIDENT', minEquity: 100000, unlocks: ['BTC', 'COIN'] },
+    { id: 'VP', title: 'VICE PRESIDENT', minEquity: 75000, unlocks: ['BTC', 'COIN'] },
     { id: 'PARTNER', title: 'PARTNER', minEquity: 250000, unlocks: [] }
   ];
 
@@ -73,7 +75,9 @@
     { id: 'win1', title: 'BOOK A WIN', desc: 'Close a position in profit', key: 'winningSells', target: 1, rewardCents: 20000 },
     { id: 'sectors2', title: 'SPREAD RISK', desc: 'Hold 2 sectors at once', key: 'sectorsHeld', target: 2, rewardCents: 18000 },
     { id: 'news1', title: 'TRADE THE TAPE', desc: 'Fill an order during news', key: 'newsTrades', target: 1, rewardCents: 22000 },
-    { id: 'pnl8', title: 'GREEN SESSION', desc: 'Reach +8% session return', key: 'sessionPct', target: 8, rewardCents: 25000 }
+    { id: 'pnl8', title: 'GREEN SESSION', desc: 'Reach +8% session return', key: 'sessionPct', target: 8, rewardCents: 25000 },
+    { id: 'short1', title: 'FADE THE RIP', desc: 'Open a short', key: 'shortsOpened', target: 1, rewardCents: 20000 },
+    { id: 'cover1', title: 'COVER GREEN', desc: 'Cover a short in profit', key: 'winningCovers', target: 1, rewardCents: 24000 }
   ];
 
   function clamp(n, lo, hi) {
@@ -92,6 +96,25 @@
     const n = Number(qty);
     if (!Number.isFinite(n) || n <= 0) return 0;
     return Math.round(n * 10000) / 10000;
+  }
+
+  function normalizeSignedQty(qty) {
+    const n = Number(qty);
+    if (!Number.isFinite(n) || n === 0) return 0;
+    const sign = n < 0 ? -1 : 1;
+    return sign * Math.round(Math.abs(n) * 10000) / 10000;
+  }
+
+  function computeEma(values, period) {
+    const n = period || EMA_PERIOD;
+    if (!values || !values.length) return [];
+    const k = 2 / (n + 1);
+    const out = new Array(values.length);
+    out[0] = values[0];
+    for (let i = 1; i < values.length; i++) {
+      out[i] = values[i] * k + out[i - 1] * (1 - k);
+    }
+    return out;
   }
 
   function tradeCostCents(qty, price) {
@@ -200,7 +223,7 @@
       impact: 0,
       volume: 0,
       ticks,
-      candles: [],
+      candles: createRing(CANDLE_LEN),
       candle: { o: last, h: last, l: last, c: last, v: 0 },
       candleTicks: 0
     };
@@ -223,7 +246,6 @@
     stock.candleTicks += 1;
     if (stock.candleTicks >= TICKS_PER_CANDLE) {
       stock.candles.push(stock.candle);
-      if (stock.candles.length > CANDLE_LEN) stock.candles.shift();
       stock.candleTicks = 0;
     }
   }
@@ -274,7 +296,7 @@
       regime: { ...REGIMES.CALM, left: 90 },
       orders: [],
       orderSeq: 1,
-      stats: { fills: 0, winningSells: 0, newsTrades: 0, sessionHighPct: 0 },
+      stats: { fills: 0, winningSells: 0, winningCovers: 0, shortsOpened: 0, newsTrades: 0, sessionHighPct: 0 },
       missions: defaultMissions(rng),
       log: [],
       events: [],
@@ -316,6 +338,39 @@
       return sum;
     }
 
+    function shortExposureCents() {
+      let sum = 0;
+      stocks.forEach((s) => {
+        const h = state.holdings[s.symbol];
+        if (!h || h.qty >= 0) return;
+        sum += tradeCostCents(-h.qty, s.price);
+      });
+      return sum;
+    }
+
+    function reservedCashCents(exceptId) {
+      return state.orders.reduce((sum, o) => {
+        if (exceptId != null && o.id === exceptId) return sum;
+        return sum + (o.reservedCents || 0);
+      }, 0);
+    }
+
+    function reservedSellQty(symbol) {
+      return state.orders.reduce((sum, o) => {
+        if (o.symbol === symbol && o.side === 'sell') return sum + o.qty;
+        return sum;
+      }, 0);
+    }
+
+    function availableCashCents(exceptId) {
+      return state.cashCents - reservedCashCents(exceptId);
+    }
+
+    function shortCapacityCents() {
+      const eq = Math.max(0, equityCents());
+      return Math.max(0, Math.round(eq * SHORT_LEVERAGE) - shortExposureCents());
+    }
+
     function equityCents() {
       return state.cashCents + holdingsValueCents();
     }
@@ -329,7 +384,7 @@
     function sectorsHeld() {
       const set = new Set();
       stocks.forEach((s) => {
-        if (state.holdings[s.symbol].qty > 0) set.add(s.sector);
+        if (state.holdings[s.symbol].qty !== 0) set.add(s.sector);
       });
       return set.size;
     }
@@ -337,14 +392,23 @@
     function positionMark(symbol) {
       const h = state.holdings[symbol];
       const s = stock(symbol);
-      if (!h || !s || h.qty <= 0) {
-        return { qty: 0, avg: 0, marketCents: 0, costCents: 0, unrealizedCents: 0, pnlPct: 0 };
+      if (!h || !s || !h.qty) {
+        return { qty: 0, avg: 0, marketCents: 0, costCents: 0, unrealizedCents: 0, pnlPct: 0, side: 'flat' };
       }
       const marketCents = tradeCostCents(h.qty, s.price);
       const unrealizedCents = marketCents - h.costCents;
       const avg = h.qty ? fromCents(h.costCents) / h.qty : 0;
-      const pnlPct = h.costCents ? (unrealizedCents / h.costCents) * 100 : 0;
-      return { qty: h.qty, avg, marketCents, costCents: h.costCents, unrealizedCents, pnlPct };
+      const basis = Math.abs(h.costCents);
+      const pnlPct = basis ? (unrealizedCents / basis) * 100 : 0;
+      return {
+        qty: h.qty,
+        avg,
+        marketCents,
+        costCents: h.costCents,
+        unrealizedCents,
+        pnlPct,
+        side: h.qty < 0 ? 'short' : 'long'
+      };
     }
 
     function emit(type, payload) {
@@ -383,6 +447,8 @@
       const snapshot = {
         fills: state.stats.fills,
         winningSells: state.stats.winningSells,
+        winningCovers: state.stats.winningCovers,
+        shortsOpened: state.stats.shortsOpened,
         newsTrades: state.stats.newsTrades,
         sectorsHeld: sectorsHeld(),
         sessionPct: Math.max(0, sessionPct())
@@ -450,45 +516,103 @@
     function fillOrder(order, fillPrice, reason) {
       const s = stock(order.symbol);
       if (!s) return { ok: false, reason: 'unknown symbol' };
-      const qty = order.qty;
-      const cost = tradeCostCents(qty, fillPrice);
+      const qty = normalizeQty(order.qty);
+      if (!qty) return { ok: false, reason: 'Enter a quantity greater than zero.' };
+      const h = state.holdings[order.symbol];
+      if (!h) return { ok: false, reason: 'unknown symbol' };
+      let realizedDelta = 0;
+      let openedShort = 0;
+      let covered = 0;
+      let coverPnl = 0;
+      let verb = order.side === 'buy' ? 'BOUGHT' : 'SOLD';
+      const longQty = Math.max(0, h.qty);
+      const shortQty = Math.max(0, -h.qty);
+
       if (order.side === 'buy') {
-        if (cost > state.cashCents) return { ok: false, reason: 'Insufficient cash.' };
-        state.cashCents -= cost;
-        const h = state.holdings[order.symbol];
-        h.costCents += cost;
-        h.qty = normalizeQty(h.qty + qty);
-      } else {
-        const h = state.holdings[order.symbol];
-        if (h.qty + 1e-9 < qty) return { ok: false, reason: 'Not enough shares.' };
-        const avgCost = h.qty ? h.costCents / h.qty : 0;
-        const closedCost = Math.round(avgCost * qty);
-        h.qty = normalizeQty(h.qty - qty);
-        h.costCents = h.qty <= 0 ? 0 : h.costCents - closedCost;
-        if (h.qty <= 0) {
-          h.qty = 0;
-          h.costCents = 0;
+        const cover = normalizeQty(Math.min(qty, shortQty));
+        const openLong = normalizeQty(qty - cover);
+        const need = tradeCostCents(cover, fillPrice) + tradeCostCents(openLong, fillPrice);
+        if (need > availableCashCents(order.id)) return { ok: false, reason: 'Insufficient cash.' };
+        if (cover > 0) {
+          const coverCost = tradeCostCents(cover, fillPrice);
+          const frac = cover / shortQty;
+          const closedCost = Math.round(h.costCents * frac);
+          const cashDelta = -coverCost;
+          const pnl = cashDelta - closedCost;
+          realizedDelta += pnl;
+          coverPnl += pnl;
+          covered = cover;
+          state.cashCents += cashDelta;
+          h.qty = normalizeSignedQty(h.qty + cover);
+          h.costCents -= closedCost;
+          if (Math.abs(h.qty) < 1e-9) {
+            h.qty = 0;
+            h.costCents = 0;
+          }
         }
-        state.cashCents += cost;
-        const pnl = cost - closedCost;
-        state.realizedCents += pnl;
-        if (pnl > 0) state.stats.winningSells += 1;
+        if (openLong > 0) {
+          const cost = tradeCostCents(openLong, fillPrice);
+          state.cashCents -= cost;
+          h.costCents += cost;
+          h.qty = normalizeQty(h.qty + openLong);
+        }
+        verb = covered && openLong ? 'COVERED/BOUGHT' : covered ? 'COVERED' : 'BOUGHT';
+      } else {
+        const close = normalizeQty(Math.min(qty, longQty));
+        const openShort = normalizeQty(qty - close);
+        if (openShort > 0) {
+          const nextExposure =
+            shortExposureCents() -
+            (h.qty < 0 ? tradeCostCents(-h.qty, s.price) : 0) +
+            tradeCostCents(openShort, fillPrice);
+          const cap = Math.round(Math.max(0, equityCents()) * SHORT_LEVERAGE);
+          if (nextExposure > cap + 1) return { ok: false, reason: 'Short capacity reached.' };
+        }
+        if (close > 0) {
+          const frac = close / longQty;
+          const closedCost = Math.round(h.costCents * frac);
+          const cashDelta = tradeCostCents(close, fillPrice);
+          const pnl = cashDelta - closedCost;
+          realizedDelta += pnl;
+          if (pnl > 0) state.stats.winningSells += 1;
+          state.cashCents += cashDelta;
+          h.qty = normalizeQty(h.qty - close);
+          h.costCents -= closedCost;
+          if (h.qty <= 0) {
+            h.qty = 0;
+            h.costCents = 0;
+          }
+        }
+        if (openShort > 0) {
+          const proceeds = tradeCostCents(openShort, fillPrice);
+          state.cashCents += proceeds;
+          h.qty = normalizeSignedQty(h.qty - openShort);
+          h.costCents -= proceeds;
+          openedShort = openShort;
+          state.stats.shortsOpened += 1;
+        }
+        verb = openedShort && close ? 'SOLD/SHORT' : openedShort ? 'SHORTED' : 'SOLD';
       }
+
+      state.realizedCents += realizedDelta;
+      if (covered > 0 && coverPnl > 0) state.stats.winningCovers += 1;
       s.impact += order.side === 'buy' ? 0.0018 * Math.min(1, qty) : -0.0018 * Math.min(1, qty);
       state.stats.fills += 1;
       if (state.news.hot) state.stats.newsTrades += 1;
-      const verb = order.side === 'buy' ? 'BOUGHT' : 'SOLD';
       const via = reason ? ' [' + reason + ']' : '';
-      log(verb + ' ' + qty + ' ' + order.symbol + ' @ $' + fillPrice.toFixed(2) + via, order.side);
+      log(verb + ' ' + qty + ' ' + order.symbol + ' @ $' + fillPrice.toFixed(2) + via, order.side === 'buy' ? 'buy' : 'sell');
       emit('fill', {
         symbol: order.symbol,
         side: order.side,
         qty,
         price: fillPrice,
         reason: reason || 'market',
-        type: order.type
+        type: order.type,
+        openedShort,
+        covered,
+        realizedCents: realizedDelta
       });
-      return { ok: true, price: fillPrice, qty, symbol: order.symbol, side: order.side };
+      return { ok: true, price: fillPrice, qty, symbol: order.symbol, side: order.side, openedShort, covered, realizedCents: realizedDelta };
     }
 
     function processWorkingOrders() {
@@ -509,7 +633,10 @@
           return;
         }
         const result = fillOrder(order, s.price, order.type.toUpperCase() + ' FILL');
-        if (!result.ok) still.push(order);
+        if (!result.ok) {
+          log('CANCELED #' + order.id + ' · ' + result.reason, 'order');
+          emit('cancel', { id: order.id, reason: result.reason });
+        }
       });
       state.orders = still;
     }
@@ -521,13 +648,14 @@
         const h = state.holdings[s.symbol];
         if (!h.qty) return;
         const cents = Math.round(h.qty * s.price * s.dividend * 100);
-        if (cents > 0) {
+        if (cents !== 0) {
           state.cashCents += cents;
           paid += cents;
         }
       });
-      if (paid > 0) {
-        log('DIVIDEND WIRE +$' + fromCents(paid).toFixed(2), 'div');
+      if (paid !== 0) {
+        const label = paid > 0 ? 'DIVIDEND WIRE +$' : 'BORROW FEE −$';
+        log(label + fromCents(Math.abs(paid)).toFixed(2), paid > 0 ? 'div' : 'warn');
         emit('dividend', { cents: paid });
       }
     }
@@ -602,6 +730,7 @@
       const pct = prev ? (change / prev) * 100 : 0;
       const dayPct = s.dayOpen ? ((s.price - s.dayOpen) / s.dayOpen) * 100 : 0;
       const pos = positionMark(s.symbol);
+      const history = s.ticks.toArray();
       return {
         symbol: s.symbol,
         name: s.name,
@@ -614,13 +743,15 @@
         volume: s.volume,
         unlocked: isUnlocked(s.symbol),
         unlockRank: s.unlockRank,
-        history: s.ticks.toArray(),
-        candles: s.candles.slice(),
-        liveCandle: stock(s.symbol).candle,
+        history,
+        candles: s.candles.toArray(),
+        liveCandle: s.candle,
+        ema: computeEma(history, EMA_PERIOD),
         holding: pos.qty,
         avg: pos.avg,
         unrealizedCents: pos.unrealizedCents,
-        pnlPct: pos.pnlPct
+        pnlPct: pos.pnlPct,
+        side: pos.side
       };
     }
 
@@ -650,6 +781,12 @@
         sessionPct: sessionPct(),
         rank: RANKS.find((r) => r.id === state.rankId),
         peakEquity: fromCents(state.peakEquityCents),
+        reservedCash: fromCents(reservedCashCents()),
+        shortExposure: fromCents(shortExposureCents()),
+        fills: state.stats.fills,
+        shortsOpened: state.stats.shortsOpened,
+        winningSells: state.stats.winningSells,
+        winningCovers: state.stats.winningCovers,
         won: state.won,
         lost: state.lost,
         news: {
@@ -663,7 +800,7 @@
         log: state.log.slice(),
         positions: stocks
           .map((s) => Object.assign({ symbol: s.symbol, name: s.name, sector: s.sector }, positionMark(s.symbol)))
-          .filter((p) => p.qty > 0)
+          .filter((p) => p.qty !== 0)
       };
     }
 
@@ -688,11 +825,18 @@
         if (!Number.isFinite(px) || px <= 0) return { ok: false, reason: 'Limit/stop needs a price.' };
       }
       if (side === 'buy') {
-        const px = orderType === 'market' ? slippedPrice(s, 'buy') : s.price;
+        const px = orderType === 'market' ? slippedPrice(s, 'buy') : Number(limitPrice) || s.price;
         const cost = tradeCostCents(qty, px);
-        if (orderType === 'market' && cost > state.cashCents) return { ok: false, reason: 'Insufficient cash.' };
+        if (cost > availableCashCents()) return { ok: false, reason: 'Insufficient cash.' };
       } else if (side === 'sell') {
-        if (state.holdings[symbol].qty + 1e-9 < qty) return { ok: false, reason: 'Not enough shares.' };
+        const longQty = Math.max(0, state.holdings[symbol].qty);
+        const availableLong = Math.max(0, longQty - reservedSellQty(symbol));
+        const shortPart = normalizeQty(qty - Math.min(qty, availableLong));
+        if (shortPart > 0) {
+          const px = orderType === 'market' ? slippedPrice(s, 'sell') : Number(limitPrice) || s.price;
+          const extra = tradeCostCents(shortPart, px);
+          if (extra > shortCapacityCents() + 1) return { ok: false, reason: 'Short capacity reached.' };
+        }
       } else {
         return { ok: false, reason: 'Side must be buy or sell.' };
       }
@@ -728,7 +872,8 @@
         type: orderType,
         qty,
         price: Number(limitPrice),
-        created: state.tick
+        created: state.tick,
+        reservedCents: side === 'buy' ? tradeCostCents(qty, Number(limitPrice)) : 0
       };
       state.orders.push(order);
       log(
@@ -756,11 +901,38 @@
       const s = stock(symbol || state.selected);
       if (!s || !isUnlocked(s.symbol) || s.price <= 0) return 0;
       const px = slippedPrice(s, 'buy');
-      let qty = normalizeQty(Math.floor((state.cashCents / (px * 100)) * 10000) / 10000);
-      while (qty > 0 && tradeCostCents(qty, px) > state.cashCents) {
+      const cash = availableCashCents();
+      let qty = normalizeQty(Math.floor((cash / (px * 100)) * 10000) / 10000);
+      while (qty > 0 && tradeCostCents(qty, px) > cash) {
         qty = normalizeQty(qty - 0.0001);
       }
       return qty;
+    }
+
+    function maxShortQty(symbol) {
+      const s = stock(symbol || state.selected);
+      if (!s || !isUnlocked(s.symbol) || s.price <= 0 || state.won || state.lost) return 0;
+      const px = slippedPrice(s, 'sell');
+      const cap = shortCapacityCents();
+      let qty = normalizeQty(Math.floor((cap / (px * 100)) * 10000) / 10000);
+      while (qty > 0 && tradeCostCents(qty, px) > cap) {
+        qty = normalizeQty(qty - 0.0001);
+      }
+      return qty;
+    }
+
+    function maxCoverQty(symbol) {
+      const s = stock(symbol || state.selected);
+      if (!s) return 0;
+      const q = state.holdings[s.symbol].qty;
+      return q < 0 ? normalizeQty(-q) : 0;
+    }
+
+    function maxSellQty(symbol) {
+      const s = stock(symbol || state.selected);
+      if (!s) return 0;
+      const longQty = Math.max(0, state.holdings[s.symbol].qty - reservedSellQty(s.symbol));
+      return normalizeQty(longQty);
     }
 
     function select(symbol) {
@@ -856,7 +1028,7 @@
     }
 
     function restore(data) {
-      if (!data || data.v !== SAVE_VERSION) return false;
+      if (!data || (data.v !== SAVE_VERSION && data.v !== 2)) return false;
       state.cashCents = data.cashCents;
       state.startingCashCents = data.startingCashCents || state.startingCashCents;
       state.holdings = data.holdings || state.holdings;
@@ -872,7 +1044,10 @@
       state.regime = data.regime || state.regime;
       state.orders = data.orders || [];
       state.nextOrderId = data.nextOrderId || 1;
-      state.stats = data.stats || state.stats;
+      state.stats = Object.assign(
+        { fills: 0, winningSells: 0, winningCovers: 0, shortsOpened: 0, newsTrades: 0, sessionHighPct: 0 },
+        data.stats || {}
+      );
       state.missions = data.missions || state.missions;
       if (state.won || state.lost) state.paused = true;
       stocks.forEach((s) => {
@@ -962,12 +1137,38 @@
       sell(qty, type, price, symbol) {
         return place('sell', symbol || state.selected, qty, type, price);
       },
+      short(qty, type, price, symbol) {
+        const sym = symbol || state.selected;
+        const held = state.holdings[sym];
+        if (held && held.qty > 0) {
+          const reason = 'Sell the long before shorting.';
+          log(reason, 'warn');
+          emit('reject', { reason, side: 'sell', symbol: sym });
+          return { ok: false, reason };
+        }
+        return place('sell', sym, qty, type, price);
+      },
+      cover(qty, type, price, symbol) {
+        const sym = symbol || state.selected;
+        const cap = maxCoverQty(sym);
+        const q = normalizeQty(Math.min(normalizeQty(qty), cap));
+        if (!q) {
+          const reason = 'No short to cover.';
+          log(reason, 'warn');
+          emit('reject', { reason, side: 'buy', symbol: sym });
+          return { ok: false, reason };
+        }
+        return place('buy', sym, q, type, price);
+      },
       cancelOrder,
       select,
       setSpeed,
       setPaused,
       togglePause,
       maxBuyQty,
+      maxShortQty,
+      maxCoverQty,
+      maxSellQty,
       getState,
       serialize,
       restore,
@@ -990,6 +1191,8 @@
     toCents,
     fromCents,
     normalizeQty,
+    normalizeSignedQty,
+    computeEma,
     tradeCostCents,
     rankForEquity,
     unlockedSet,
@@ -1002,6 +1205,9 @@
     WIN_EQUITY,
     BANKRUPT_EQUITY,
     HISTORY_LEN,
-    TICKS_PER_DAY
+    TICKS_PER_DAY,
+    EMA_PERIOD,
+    SHORT_LEVERAGE,
+    SAVE_VERSION
   };
 });

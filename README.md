@@ -19,11 +19,12 @@ npm start
 - Simulated book starts at **$10,000**. Clear **$100,000**. Wipe under **$250**
 - Mean-reverting tape, news shocks, BULL / BEAR / CRASH / EARNINGS regimes
 - Market, limit, and stop orders; fractional size; max-buy; light slippage and trade impact
+- Short / cover (1× equity capacity); borrow fee on dividend names
 - Cost basis, realized / unrealized P&L, occasional simulated dividends
-- Rank ladder (INTERN → PARTNER) that unlocks more names
-- Desk contracts, local leaderboard, autosave
-- CRT scanlines, phosphor / amber / ice themes, ticks, toasts, fill bursts
-- Keyboard: `SPACE` pause · `B` buy · `S` sell · `1–6` watch · `[` `]` size
+- Rank ladder (INTERN → PARTNER) that unlocks more names — VP at $75k so BTC is playable before the $100k win
+- Desk contracts, local leaderboard, autosave, session P&L card
+- CRT scanline slider, phosphor / amber / ice themes, EMA20 overlay, ticks, toasts, fill bursts
+- Keyboard: `SPACE` pause · `B` buy · `S` sell · `H` short · `C` cover · `1–6` watch · `[` `]` size
 
 This is a game. Quotes are invented. Nothing here is a real market, a real order, or financial advice.
 
