@@ -238,7 +238,7 @@
     const first = data[0];
     const bull = last >= first;
     const color = bull ? up : down;
-    const pad = { l: 8, r: 62, t: 12, b: 28 };
+    const pad = { l: 10, r: 72, t: 14, b: 30 };
     const candles = stock.candles.concat([stock.liveCandle]).filter(Boolean);
     const series = mode === 'candle' && candles.length ? candles.map((c) => c.c) : data;
     const min = Math.min.apply(null, mode === 'candle' && candles.length ? candles.flatMap((c) => [c.l, c.c]) : data);
@@ -302,14 +302,14 @@
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = color;
-    ctx.fillRect(w - pad.r + 4, yOf(last) - 8, 54, 16);
+    ctx.fillRect(w - pad.r + 6, yOf(last) - 8, 62, 16);
     ctx.fillStyle = '#04110b';
     ctx.font = '11px ui-monospace, monospace';
-    ctx.fillText(last.toFixed(2), w - pad.r + 8, yOf(last) + 3);
+    ctx.fillText(last.toFixed(2), w - pad.r + 10, yOf(last) + 3);
 
     ctx.fillStyle = muted;
-    ctx.fillText(max.toFixed(2), w - pad.r + 4, pad.t + 8);
-    ctx.fillText(min.toFixed(2), w - pad.r + 4, h - pad.b);
+    if (Math.abs(yOf(max) - yOf(last)) > 16) ctx.fillText(max.toFixed(2), w - pad.r + 6, pad.t + 10);
+    if (Math.abs(yOf(min) - yOf(last)) > 16) ctx.fillText(min.toFixed(2), w - pad.r + 6, h - 10);
 
     if (hover) {
       const x = hover.x;

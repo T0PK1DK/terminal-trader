@@ -99,7 +99,7 @@ button, input, select {
 button { cursor: pointer; }
 
 .desk {
-  max-width: 1440px;
+  max-width: 1480px;
   margin: 0 auto;
   padding: 10px 12px 18px;
   position: relative;
@@ -107,10 +107,10 @@ button { cursor: pointer; }
 
 .tape-wrap {
   overflow: hidden;
-  border: 1px solid var(--line-dim);
+  border: 1px solid var(--line);
   background: #020805;
   margin-bottom: 8px;
-  height: 28px;
+  height: 30px;
   display: flex;
   align-items: center;
   box-shadow: var(--shadow);
@@ -136,24 +136,33 @@ button { cursor: pointer; }
 }
 
 .topbar {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(420px, 2.2fr) auto;
-  gap: 10px;
-  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
-.brand {
+.mast {
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
   border: 1px solid var(--line-dim);
   background: var(--panel);
-  padding: 8px 10px;
   box-shadow: var(--shadow);
 }
 
+.brand {
+  padding: 10px 14px;
+  min-width: 280px;
+  flex: 1 1 280px;
+}
+
 .brand h1 {
-  font-size: 18px;
+  font-size: 22px;
   letter-spacing: 0.22em;
-  text-shadow: 0 0 12px var(--line);
+  text-shadow: 0 0 16px var(--line);
 }
 
 .brand .sub {
@@ -188,14 +197,14 @@ button { cursor: pointer; }
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
   gap: 6px;
 }
 
 .stat {
   border: 1px solid var(--line-dim);
   background: var(--panel);
-  padding: 7px 8px;
+  padding: 8px 10px;
   min-width: 0;
 }
 
@@ -208,9 +217,7 @@ button { cursor: pointer; }
 
 .stat b {
   display: block;
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 16px;
   white-space: nowrap;
 }
 
@@ -220,14 +227,19 @@ button { cursor: pointer; }
   gap: 6px;
   align-content: center;
   justify-content: flex-end;
+  padding: 10px 12px;
+  flex: 1 1 420px;
 }
 
 .controls button, .icon-btn, .chip, .ticket button, .qty-row button {
   background: #06110d;
   border: 1px solid var(--line);
   color: var(--line);
-  padding: 6px 10px;
+  padding: 8px 11px;
   letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 34px;
   box-shadow: 0 0 0 transparent;
   transition: background 0.12s, color 0.12s, box-shadow 0.12s, transform 0.08s;
 }
@@ -252,7 +264,7 @@ button { cursor: pointer; }
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--line-dim);
+  border: 1px solid color-mix(in srgb, var(--line) 45%, var(--line-dim));
   box-shadow: var(--shadow);
   min-width: 0;
 }
@@ -525,8 +537,17 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   margin-top: 8px;
 }
 
+@media (max-width: 1100px) {
+  .stats { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+}
+
 @media (max-width: 980px) {
-  .topbar, .workspace, .bottom, .stats { grid-template-columns: 1fr; }
+  .workspace, .bottom { grid-template-columns: 1fr; }
   #chart-wrap { height: 240px; }
   .watch { max-height: 280px; }
+}
+
+@media (max-width: 640px) {
+  .stats { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+  .brand h1 { font-size: 18px; }
 }

@@ -16,11 +16,26 @@
   <div class="tape-wrap" aria-hidden="true"><div class="tape" id="tape"></div></div>
 
   <header class="topbar">
-    <div class="brand">
-      <div class="live"><i></i> LIVE DESK</div>
-      <h1>TERMINAL TRADER</h1>
-      <div class="sub">SIMULATED FUNDS ONLY · NOT A BROKER · GOAL $100,000</div>
-      <div class="bar" style="margin-top:6px"><i id="goalFill"></i></div>
+    <div class="mast">
+      <div class="brand">
+        <div class="live"><i></i> LIVE DESK</div>
+        <h1>TERMINAL TRADER</h1>
+        <div class="sub">SIMULATED FUNDS ONLY · NOT A BROKER · GOAL $100,000</div>
+        <div class="bar" style="margin-top:6px"><i id="goalFill"></i></div>
+      </div>
+      <div class="controls">
+        <button data-speed="1" class="active">1X</button>
+        <button data-speed="2">2X</button>
+        <button data-speed="5">5X</button>
+        <button id="pauseBtn">PAUSE</button>
+        <button id="muteBtn">MUTE</button>
+        <button data-theme="phosphor">PHOS</button>
+        <button data-theme="amber">AMBER</button>
+        <button data-theme="ice">ICE</button>
+        <button id="helpBtn">HELP</button>
+        <button id="boardBtn">BOARD</button>
+        <button id="resetBtn">RESET</button>
+      </div>
     </div>
     <div class="stats">
       <div class="stat"><label>CASH</label><b>$<span id="cash">10,000.00</span></b></div>
@@ -29,19 +44,6 @@
       <div class="stat"><label>SESSION</label><b id="pnl">+0.00%</b></div>
       <div class="stat"><label>DAY / RANK</label><b><span id="day">1</span> · <span id="rank">INTERN</span></b></div>
       <div class="stat"><label>REGIME</label><b id="regime">REGULAR HOURS</b></div>
-    </div>
-    <div class="controls">
-      <button data-speed="1" class="active">1X</button>
-      <button data-speed="2">2X</button>
-      <button data-speed="5">5X</button>
-      <button id="pauseBtn">PAUSE</button>
-      <button id="muteBtn">MUTE</button>
-      <button data-theme="phosphor">PHOS</button>
-      <button data-theme="amber">AMBER</button>
-      <button data-theme="ice">ICE</button>
-      <button id="helpBtn">HELP</button>
-      <button id="boardBtn">BOARD</button>
-      <button id="resetBtn">RESET</button>
     </div>
   </header>
 
@@ -120,7 +122,7 @@
   <div class="modal">
     <h3 id="modalTitle">DESK</h3>
     <div id="modalBody"></div>
-    <button id="closeModal">CLOSE</button>
+    <button id="closeModal" class="buy-btn">CLOSE</button>
   </div>
 </div>
 
