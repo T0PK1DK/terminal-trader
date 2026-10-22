@@ -1,6 +1,35 @@
 # Handoff
 
-## What shipped (UI polish pass)
+## What shipped (fill markers pass)
+
+Still **2D**. No deploy. Built on the open UI-polish PR branch (`claude/terminal-trader-ui-polish-oazocn`, PR #3 not merged yet).
+
+- **Trade markers (roadmap item d)** — every fill drops a glyph on the chart at its tick and fill price: **▲ under the print for buys** (up color), **▼ over the print for sells** (down color), with a small letter beside it: `B`, `S`, `SH` (opened short), `CV` (cover). A thin stem plus a dot tie the glyph to the exact price. Several fills on the same slot stack outward instead of overlapping.
+- Works in **LINE and CANDLE** modes, slides with the existing glide (`offset`), drops off the left edge as the ring buffer rolls, and is cleared on reset. Capped at 240 marks in memory.
+- **FILLS toggle** next to EMA20 (`#fillsBtn`, `aria-pressed`, persisted in `localStorage` as `tt.fills`).
+- **Hover tooltip** (`#fillTip`) on a glyph: `SHORT 2 @ $194.88 · T41`, colored by theme tokens.
+- New glyphs pop in over ~360ms; the pop only keeps the chart animating while it runs (`chartAnimating`), and it is skipped under `prefers-reduced-motion`. No new per-tick DOM work; everything is on the existing canvas pass.
+- **Engine bug fixed (found while building this):** `emit('fill', {..., type: order.type})` overwrote the event's `type`, so fill events reached the UI as `type: "market"` / `"limit"`. Fill toasts, buy/sell sounds and the fill burst never fired. The order type now rides as `orderType`. Two new tests cover fill events (tick/price/side/orderType) and short/cover flags. **40/40 green** (was 38).
+
+### Research (pattern copied)
+
+TradingView (executions on chart), Webull and thinkorswim (B/S bubbles at the fill price), Kraken Pro / Binance ("show my trades" on the chart), Robinhood (dots on the line at each buy/sell). The shared pattern: a glyph at the fill price on the fill's bar, buys green pointing up from below, sells red pointing down from above, a toggle to hide them, details on hover. A Mobbin web search returned no chart-with-executions screens, so this is from the apps above.
+
+Differences on purpose:
+- Short / cover get their own letters (`SH` / `CV`); most brokers only say B/S, but shorting is core here.
+- Tooltip on hover only (no tap tooltip on phones yet); the letter beside each glyph carries the key info on touch.
+- Markers are session-only (not saved with the game). Restoring a save shows the chart without old fills.
+
+### Skipped and why
+- Persisting markers across reloads: needs an engine fill history in `serialize`; not worth a save-format change for this pass.
+- Tap-to-inspect on phones: needs a touch hit-test that does not fight chart scroll; next pass.
+
+### What is next
+1. Merge PR #3, then this PR.
+2. Tap-to-inspect fill markers on phones; optional persisted fill history.
+3. CSV export of the audit log; stop-limit ticket type; more contracts.
+
+## Previous pass (UI polish pass)
 
 Still **2D**. No deploy. No engine changes; shorting, EMA20 and the session P&L card behave as before.
 

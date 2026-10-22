@@ -76,6 +76,7 @@
           <button class="chip active" data-chart="line">LINE</button>
           <button class="chip" data-chart="candle">CANDLE</button>
           <button class="chip active" id="emaBtn" data-ema="1">EMA20</button>
+          <button class="chip active" id="fillsBtn" aria-pressed="true" title="Show your fills on the chart">FILLS</button>
         </div>
       </div>
       <div id="chart-wrap">
@@ -83,6 +84,7 @@
         <div class="chart-legend" id="chartLegend"></div>
         <i class="last-dot" id="lastDot"></i>
         <div class="crosshair" id="crosshair"></div>
+        <div class="fill-tip" id="fillTip" role="status"></div>
       </div>
       <div class="movers" id="movers"></div>
     </section>

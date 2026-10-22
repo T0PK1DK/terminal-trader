@@ -426,3 +426,32 @@ test('serialize restore keeps a short book', () => {
   assert.equal(pos.qty, -2);
   assert.equal(pos.side, 'short');
 });
+
+test('fill events keep type "fill" and carry tick, price, side and order type', () => {
+  const g = game();
+  g.tickMarket();
+  g.tickMarket();
+  g.drainEvents();
+  const tick = g.getState().tick;
+  assert.equal(g.buy(2, 'market', null, 'AAPL').ok, true);
+  const fills = g.drainEvents().filter((e) => e.type === 'fill');
+  assert.equal(fills.length, 1);
+  assert.equal(fills[0].tick, tick);
+  assert.equal(fills[0].side, 'buy');
+  assert.equal(fills[0].orderType, 'market');
+  assert.ok(fills[0].price > 0);
+});
+
+test('short and cover fills are flagged for chart markers', () => {
+  const g = game();
+  g.tickMarket();
+  g.drainEvents();
+  g.short(2, 'market', null, 'AAPL');
+  g.cover(2, 'market', null, 'AAPL');
+  const fills = g.drainEvents().filter((e) => e.type === 'fill');
+  assert.equal(fills.length, 2);
+  assert.equal(fills[0].side, 'sell');
+  assert.ok(fills[0].openedShort > 0);
+  assert.equal(fills[1].side, 'buy');
+  assert.ok(fills[1].covered > 0);
+});
