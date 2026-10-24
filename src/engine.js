@@ -607,7 +607,7 @@
         qty,
         price: fillPrice,
         reason: reason || 'market',
-        type: order.type,
+        orderType: order.type,
         openedShort,
         covered,
         realizedCents: realizedDelta

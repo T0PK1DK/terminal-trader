@@ -13,12 +13,20 @@
   let hover = null;
   let bootDone = false;
   let showEma = true;
+  // Fill markers: one glyph per fill at its tick and price (UI-only; fed from the 'fill' event stream).
+  let showFills = true;
+  const fillMarks = [];
+  const FILL_MARK_CAP = 240;
+  let markTick = -1;
   let fxSized = { w: 0, h: 0, dpr: 1 };
   const cardRefs = new Map();
   const tapeRefs = { built: 0, nodes: [] };
   const dirtyHash = { missions: '', book: '', news: '' };
   const tween = { cash: 10000, equity: 10000, hold: 0 };
   const particles = [];
+  const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  // Chart easing: the newest print glides in and the y-range eases instead of snapping.
+  const view = { symbol: '', mode: '', tick: -1, len: 0, from: 0, to: 0, shown: 0, at: 0, ms: 0, shift: false, min: 0, max: 0, settled: true, quotePx: 0 };
 
   function game() {
     return gameHolder.current;
@@ -34,7 +42,7 @@
   }
 
   function money(n) {
-    return '$' + fmt(n, 2);
+    return (n <= -0.005 ? '-$' : '$') + fmt(Math.abs(n), 2);
   }
 
   function clsDelta(n) {
@@ -245,54 +253,246 @@
     return state.stocks.find((s) => s.symbol === state.selected) || state.stocks[0];
   }
 
-  function drawChart(state) {
+  function easeOut(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  // Called once per simulation tick: queue a glide from the price on screen to the new print.
+  function noteTick(state) {
+    const stock = selectedStock(state);
+    const data = stock.history;
+    const last = data.length ? data[data.length - 1] : 0;
+    if (stock.symbol !== view.symbol) {
+      view.symbol = stock.symbol;
+      view.tick = state.tick;
+      view.len = data.length;
+      view.from = view.to = view.shown = last;
+      view.at = 0;
+      view.settled = false;
+      view.min = view.max = 0;
+      return;
+    }
+    if (state.tick === view.tick) return;
+    view.tick = state.tick;
+    view.shift = data.length === view.len;
+    view.len = data.length;
+    view.from = view.shown || last;
+    view.to = last;
+    view.at = reduceMotion ? 0 : performance.now();
+    view.ms = Math.min(650, 850 / (state.speed || 1));
+    view.settled = false;
+  }
+
+  function addFillMark(ev) {
+    if (!ev.symbol || !(ev.price > 0)) return;
+    const kind = ev.openedShort ? 'short' : ev.covered ? 'cover' : ev.side === 'buy' ? 'buy' : 'sell';
+    fillMarks.push({ symbol: ev.symbol, tick: ev.tick || 0, price: ev.price, qty: ev.qty, side: ev.side, kind, born: performance.now() });
+    if (fillMarks.length > FILL_MARK_CAP) fillMarks.splice(0, fillMarks.length - FILL_MARK_CAP);
+  }
+
+  const MARK_LETTER = { buy: 'B', sell: 'S', short: 'SH', cover: 'CV' };
+
+  // Shared broker pattern: buys ▲ under the print (green), sells ▼ over it (red), qty letter beside it.
+  function drawFillMarks(ctx, state, stock, geo) {
+    if (state.tick < markTick) fillMarks.length = 0; // new game
+    markTick = state.tick;
+    if (!showFills || !fillMarks.length) return null;
+    const { pad, innerW, yOf, n, offset, candleMode, candleCount, up, down, font, bg, ts, hover } = geo;
+    const placed = [];
+    const stack = {};
+    for (let k = 0; k < fillMarks.length; k++) {
+      const m = fillMarks[k];
+      if (m.symbol !== stock.symbol) continue;
+      const ago = Math.max(0, state.tick - m.tick);
+      let x;
+      if (candleMode) {
+        const ci = candleCount - 1 - Math.floor(ago / 5);
+        if (ci < 0) continue;
+        x = pad.l + (ci + 0.5) * (innerW / candleCount);
+      } else {
+        const i = n - 1 - ago;
+        if (i < 0) continue;
+        x = i === n - 1 ? pad.l + innerW : pad.l + (i / (n - 1)) * innerW + offset;
+      }
+      const isBuy = m.side === 'buy';
+      const key = Math.round(x) + (isBuy ? 'b' : 's');
+      const lane = (stack[key] = (stack[key] || 0) + 1) - 1;
+      const py = yOf(m.price);
+      const dir = isBuy ? 1 : -1;
+      const gy = py + dir * (9 + lane * 13);
+      placed.push({ m, x, py, gy, dir, isBuy });
+    }
+    if (!placed.length) return null;
+    ctx.save();
+    ctx.font = '700 10px ' + font;
+    let near = null;
+    placed.forEach((p) => {
+      const col = p.isBuy ? up : down;
+      const age = ts - p.m.born;
+      const pop = reduceMotion || age > 360 ? 1 : 0.6 + 0.4 * easeOut(Math.max(0, age) / 360);
+      const s = 6 * pop;
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.py);
+      ctx.lineTo(p.x, p.gy - p.dir * s);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(p.x, p.py, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      // ▲ tip points at the price from below; ▼ from above
+      ctx.moveTo(p.x, p.gy - p.dir * s);
+      ctx.lineTo(p.x - s, p.gy + p.dir * s * 0.8);
+      ctx.lineTo(p.x + s, p.gy + p.dir * s * 0.8);
+      ctx.closePath();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = bg;
+      ctx.stroke();
+      ctx.fill();
+      if (p.m.kind === 'short' || p.m.kind === 'cover') {
+        ctx.fillStyle = bg;
+        ctx.fillRect(p.x - 1, p.gy - 1, 2, 2);
+      }
+      const letter = MARK_LETTER[p.m.kind];
+      ctx.fillStyle = col;
+      const lx = p.x + 8;
+      if (lx + 14 < pad.l + innerW + 4) ctx.fillText(letter, lx, p.gy + 3);
+      if (hover && Math.abs(hover.x - p.x) < 8 && Math.abs(hover.y - p.gy) < 12) near = p;
+    });
+    ctx.restore();
+    return near;
+  }
+
+  function fillMarksAnimating(ts) {
+    if (reduceMotion || !showFills) return false;
+    for (let k = fillMarks.length - 1; k >= 0 && k >= fillMarks.length - 4; k--) if (ts - fillMarks[k].born < 380) return true;
+    return false;
+  }
+
+  function chartAnimating(ts) {
+    return !view.settled || (view.at && ts - view.at < view.ms) || fillMarksAnimating(ts);
+  }
+
+  function drawChart(state, now) {
     const canvas = $('chart');
     const ctx = canvas.getContext('2d');
     const { w, h, dpr } = chartSize;
     if (!w || !h) return;
+    const ts = now || performance.now();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const stock = selectedStock(state);
     const mode = document.querySelector('[data-chart].active')?.dataset.chart || 'line';
     const data = stock.history;
+    const dot = $('lastDot');
     if (!stock.unlocked || data.length < 2) {
       ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--muted');
+      ctx.font = '11px ui-monospace, monospace';
       ctx.fillText(stock.unlocked ? 'WAITING FOR PRINTS…' : 'SYMBOL LOCKED', 16, 28);
+      dot.style.display = 'none';
+      $('chartLegend').innerHTML = '';
+      view.legend = '';
+      view.settled = true;
+      chartDirty = false;
       return;
     }
+    if (view.symbol !== stock.symbol) noteTick(state);
     const style = getComputedStyle(document.body);
     const up = style.getPropertyValue('--up').trim();
     const down = style.getPropertyValue('--down').trim();
-    const line = style.getPropertyValue('--line').trim();
     const muted = style.getPropertyValue('--muted').trim();
+    const cyan = style.getPropertyValue('--cyan').trim() || '#4de6ff';
+    const font = style.getPropertyValue('--font').trim() || 'ui-monospace, monospace';
+
+    // glide progress for the newest print
+    const raw = view.at && view.ms ? clamp((ts - view.at) / view.ms, 0, 1) : 1;
+    const e = easeOut(raw);
     const last = data[data.length - 1];
+    const shownLast = view.from + (last - view.from) * e;
+    view.shown = shownLast;
     const first = data[0];
     const bull = last >= first;
     const color = bull ? up : down;
-    const pad = { l: 10, r: 72, t: 14, b: 30 };
+    const narrow = w < 420;
+    const pad = { l: 8, r: narrow ? 58 : 70, t: 14, b: 22 };
     const candles = stock.candles.concat([stock.liveCandle]).filter(Boolean);
-    const series = mode === 'candle' && candles.length ? candles.map((c) => c.c) : data;
-    const min = Math.min.apply(null, mode === 'candle' && candles.length ? candles.flatMap((c) => [c.l, c.c]) : data);
-    const max = Math.max.apply(null, mode === 'candle' && candles.length ? candles.flatMap((c) => [c.h, c.c]) : data);
+    const candleMode = mode === 'candle' && candles.length;
+    const series = candleMode ? candles.map((c) => c.c) : data;
+    let lo = Infinity;
+    let hi = -Infinity;
+    if (candleMode) {
+      candles.forEach((c) => {
+        if (c.l < lo) lo = c.l;
+        if (c.h > hi) hi = c.h;
+      });
+    } else {
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] < lo) lo = data[i];
+        if (data[i] > hi) hi = data[i];
+      }
+    }
+    // a little headroom so the line never kisses the frame
+    const headroom = (hi - lo || hi * 0.01 || 1) * 0.08;
+    const tMin = lo - headroom;
+    const tMax = hi + headroom;
+    if (mode !== view.mode || !view.max || reduceMotion) {
+      view.min = tMin;
+      view.max = tMax;
+      view.mode = mode;
+    } else {
+      const dt = Math.min(64, ts - (view.lastDraw || ts));
+      // widen quickly so prints never leave the frame, tighten slowly so it doesn't breathe
+      const ease = (target, cur, widen) => cur + (target - cur) * (1 - Math.pow(0.001, dt / (widen ? 120 : 480)));
+      view.min = ease(tMin, view.min, tMin < view.min);
+      view.max = ease(tMax, view.max, tMax > view.max);
+    }
+    view.lastDraw = ts;
+    const span = tMax - tMin || 1;
+    const rangeSettled = Math.abs(view.min - tMin) < span * 0.002 && Math.abs(view.max - tMax) < span * 0.002;
+    if (rangeSettled) {
+      view.min = tMin;
+      view.max = tMax;
+    }
+    view.settled = rangeSettled && raw >= 1;
+    const min = view.min;
+    const max = view.max;
     const range = max - min || 1;
     const innerW = w - pad.l - pad.r;
     const innerH = h - pad.t - pad.b;
     const yOf = (p) => pad.t + (1 - (p - min) / range) * innerH;
+    const step = innerW / (data.length - 1);
+    // while the ring is full every point slides one slot left as the new print lands
+    const offset = !candleMode && view.shift ? (1 - e) * step : 0;
+    const xOf = (i, n) => pad.l + (i / (n - 1)) * innerW;
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.font = '10px ' + font;
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) {
-      const y = pad.t + (innerH / 3) * i;
+    ctx.fillStyle = muted;
+    for (let i = 0; i <= 4; i++) {
+      const y = Math.round(pad.t + (innerH / 4) * i) + 0.5;
       ctx.beginPath();
       ctx.moveTo(pad.l, y);
       ctx.lineTo(w - pad.r, y);
       ctx.stroke();
+      const p = max - (range / 4) * i;
+      ctx.fillText(p.toFixed(2), w - pad.r + 6, y + 3);
     }
 
-    if (mode === 'candle' && candles.length) {
-      const bw = Math.max(3, innerW / candles.length - 1.5);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(pad.l, 0, innerW, h);
+    ctx.clip();
+
+    if (candleMode) {
+      const slot = innerW / candles.length;
+      const bw = Math.max(2, slot * 0.68);
       candles.forEach((c, i) => {
-        const x = pad.l + (i + 0.5) * (innerW / candles.length);
+        const x = Math.round(pad.l + (i + 0.5) * slot) + 0.5;
         const cUp = c.c >= c.o;
         ctx.strokeStyle = cUp ? up : down;
         ctx.fillStyle = cUp ? up : down;
@@ -302,80 +502,188 @@
         ctx.stroke();
         const top = yOf(Math.max(c.o, c.c));
         const bot = yOf(Math.min(c.o, c.c));
+        ctx.globalAlpha = i === candles.length - 1 ? 0.7 : 1;
         ctx.fillRect(x - bw / 2, top, bw, Math.max(1, bot - top));
+        ctx.globalAlpha = 1;
       });
     } else {
+      const n = data.length;
+      const px = (i) => (i === n - 1 ? pad.l + innerW : xOf(i, n) + offset);
+      const py = (i) => yOf(i === n - 1 ? shownLast : data[i]);
       ctx.beginPath();
-      data.forEach((p, i) => {
-        const x = pad.l + (i / (data.length - 1)) * innerW;
-        const y = yOf(p);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
+      for (let i = 0; i < n; i++) {
+        if (i === 0) ctx.moveTo(px(i), py(i));
+        else ctx.lineTo(px(i), py(i));
+      }
+      ctx.lineJoin = 'round';
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.75;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 10;
       ctx.stroke();
       ctx.shadowBlur = 0;
       ctx.lineTo(pad.l + innerW, h - pad.b);
-      ctx.lineTo(pad.l, h - pad.b);
+      ctx.lineTo(px(0), h - pad.b);
       ctx.closePath();
-      ctx.fillStyle = bull ? 'rgba(61,255,154,0.10)' : 'rgba(255,77,109,0.10)';
+      const grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+      grad.addColorStop(0, bull ? 'rgba(61,255,154,0.20)' : 'rgba(255,77,109,0.20)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
       ctx.fill();
     }
 
     if (showEma && stock.ema && stock.ema.length > 1) {
+      const n = stock.ema.length;
       ctx.beginPath();
       stock.ema.forEach((p, i) => {
-        const x = pad.l + (i / (stock.ema.length - 1)) * innerW;
+        const x = xOf(i, n) + (i === n - 1 ? 0 : offset);
         const y = yOf(p);
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
-      ctx.strokeStyle = style.getPropertyValue('--cyan').trim() || '#4de6ff';
+      ctx.strokeStyle = cyan;
       ctx.lineWidth = 1.25;
       ctx.setLineDash([3, 4]);
-      ctx.shadowBlur = 0;
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    const nearMark = drawFillMarks(ctx, state, stock, {
+      pad, innerW, yOf, n: data.length, offset, candleMode, candleCount: candles.length,
+      up, down, font, bg: style.getPropertyValue('--bg').trim() || '#04110b', ts, hover
+    });
+    ctx.restore();
 
-    ctx.setLineDash([4, 4]);
+    // Entry + working-order lines: price under your short's line reads as winning at a glance.
+    const levels = [];
+    if (stock.holding && stock.avg) {
+      const pnl = stock.unrealizedCents / 100;
+      levels.push({
+        price: stock.avg,
+        color: style.getPropertyValue('--amber').trim() || '#ffc14a',
+        label: (stock.side === 'short' ? 'SHORT ' : 'LONG ') + String(Math.abs(stock.holding)) + ' @ ' + stock.avg.toFixed(2),
+        tail: (pnl >= 0 ? '+' : '') + money(pnl),
+        tailColor: pnl >= 0 ? up : down
+      });
+    }
+    state.orders.forEach((o) => {
+      if (o.symbol !== stock.symbol) return;
+      levels.push({
+        price: o.price,
+        color: o.side === 'buy' ? up : down,
+        label: o.type.toUpperCase() + ' ' + o.side.toUpperCase() + ' ' + o.qty,
+        dash: [6, 3]
+      });
+    });
+    levels.forEach((lv) => {
+      const raw = yOf(lv.price);
+      const off = raw < pad.t ? -1 : raw > h - pad.b ? 1 : 0;
+      const y = Math.round(clamp(raw, pad.t + 8, h - pad.b - 8)) + 0.5;
+      ctx.strokeStyle = lv.color;
+      ctx.globalAlpha = off ? 0.35 : 0.85;
+      ctx.setLineDash(lv.dash || [1, 0]);
+      ctx.lineWidth = 1;
+      if (!off) {
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(w - pad.r, y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.font = '700 10px ' + font;
+      const text = (off < 0 ? '▲ ' : off > 0 ? '▼ ' : '') + lv.label;
+      const tw = ctx.measureText(text).width;
+      const tailW = lv.tail ? ctx.measureText(lv.tail).width + 10 : 0;
+      ctx.fillStyle = lv.color;
+      ctx.fillRect(pad.l, y - 7, tw + 8, 14);
+      ctx.fillStyle = style.getPropertyValue('--bg').trim() || '#04110b';
+      ctx.fillText(text, pad.l + 4, y + 3);
+      if (lv.tail) {
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(pad.l + tw + 8, y - 7, tailW, 14);
+        ctx.fillStyle = lv.tailColor;
+        ctx.fillText(lv.tail, pad.l + tw + 13, y + 3);
+      }
+    });
+
+    const shownPx = candleMode ? last : shownLast;
+    const ly = Math.round(yOf(shownPx)) + 0.5;
+    ctx.setLineDash([2, 4]);
     ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.7;
     ctx.beginPath();
-    ctx.moveTo(pad.l, yOf(last));
-    ctx.lineTo(w - pad.r, yOf(last));
+    ctx.moveTo(pad.l, ly);
+    ctx.lineTo(w - pad.r, ly);
     ctx.stroke();
+    ctx.globalAlpha = 1;
     ctx.setLineDash([]);
     ctx.fillStyle = color;
-    ctx.fillRect(w - pad.r + 6, yOf(last) - 8, 62, 16);
+    ctx.fillRect(w - pad.r + 1, ly - 9, pad.r - 2, 18);
+    ctx.beginPath();
+    ctx.moveTo(w - pad.r + 1, ly - 9);
+    ctx.lineTo(w - pad.r - 5, ly);
+    ctx.lineTo(w - pad.r + 1, ly + 9);
+    ctx.fill();
     ctx.fillStyle = style.getPropertyValue('--bg').trim() || '#04110b';
-    ctx.font = '11px ui-monospace, monospace';
-    ctx.fillText(last.toFixed(2), w - pad.r + 10, yOf(last) + 3);
+    ctx.font = '700 11px ' + font;
+    ctx.fillText(shownPx.toFixed(2), w - pad.r + 5, ly + 4);
 
-    ctx.fillStyle = muted;
-    if (Math.abs(yOf(max) - yOf(last)) > 16) ctx.fillText(max.toFixed(2), w - pad.r + 6, pad.t + 10);
-    if (Math.abs(yOf(min) - yOf(last)) > 16) ctx.fillText(min.toFixed(2), w - pad.r + 6, h - 10);
+    const lc = stock.liveCandle;
+    const emaLast = stock.ema && stock.ema.length ? stock.ema[stock.ema.length - 1] : null;
+    const legend =
+      '<span>' + stock.symbol + '</span>' +
+      (lc
+        ? '<span>O<b>' + lc.o.toFixed(2) + '</b></span><span>H<b>' + lc.h.toFixed(2) + '</b></span><span>L<b>' + lc.l.toFixed(2) + '</b></span><span>C<b>' + lc.c.toFixed(2) + '</b></span>'
+        : '') +
+      (showEma && emaLast != null ? '<span class="ema">EMA20<b>' + emaLast.toFixed(2) + '</b></span>' : '');
+    if (view.legend !== legend) {
+      $('chartLegend').innerHTML = legend;
+      view.legend = legend;
+    }
 
-    if (hover) {
+    if (!candleMode) {
+      dot.style.display = 'block';
+      dot.style.setProperty('--dot', color);
+      dot.style.transform = 'translate(' + (pad.l + innerW) + 'px,' + yOf(shownLast) + 'px)';
+    } else {
+      dot.style.display = 'none';
+    }
+
+    const tag = $('crosshair');
+    if (hover && hover.x >= pad.l && hover.x <= pad.l + innerW) {
       const x = hover.x;
       const t = Math.round(((x - pad.l) / innerW) * (series.length - 1));
       const px = series[clamp(t, 0, series.length - 1)];
       if (px != null) {
-        ctx.strokeStyle = style.getPropertyValue('--cyan').trim();
+        ctx.strokeStyle = cyan;
+        ctx.globalAlpha = 0.6;
+        ctx.setLineDash([2, 3]);
         ctx.beginPath();
-        ctx.moveTo(x, pad.t);
-        ctx.lineTo(x, h - pad.b);
+        ctx.moveTo(Math.round(x) + 0.5, pad.t);
+        ctx.lineTo(Math.round(x) + 0.5, h - pad.b);
+        ctx.moveTo(pad.l, Math.round(yOf(px)) + 0.5);
+        ctx.lineTo(w - pad.r, Math.round(yOf(px)) + 0.5);
         ctx.stroke();
-        const tag = $('crosshair');
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
         tag.style.display = 'block';
-        tag.style.left = Math.min(x + 8, w - 90) + 'px';
+        tag.style.left = w - pad.r + 1 + 'px';
+        tag.style.width = pad.r - 2 + 'px';
         tag.style.top = yOf(px) + 'px';
         tag.textContent = money(px);
       }
+      const tip = $('fillTip');
+      if (nearMark) {
+        const m = nearMark.m;
+        tip.className = 'fill-tip ' + (nearMark.isBuy ? 'up' : 'down');
+        tip.textContent = m.kind.toUpperCase() + ' ' + m.qty + ' @ ' + money(m.price) + ' · T' + m.tick;
+        tip.style.left = clamp(nearMark.x, 60, w - pad.r - 60) + 'px';
+        tip.style.top = nearMark.gy + (nearMark.isBuy ? 12 : -30) + 'px';
+        tip.style.display = 'block';
+      } else tip.style.display = 'none';
     } else {
-      $('crosshair').style.display = 'none';
+      tag.style.display = 'none';
+      $('fillTip').style.display = 'none';
     }
     chartDirty = false;
   }
@@ -387,7 +695,14 @@
   function paintQuote(state) {
     const s = selectedStock(state);
     $('qSym').textContent = s.symbol + ' · ' + s.name;
-    $('qPx').textContent = s.unlocked ? money(s.price) : 'LOCKED';
+    const qPx = $('qPx');
+    qPx.textContent = s.unlocked ? money(s.price) : 'LOCKED';
+    if (s.unlocked && view.quotePx && s.price !== view.quotePx && !reduceMotion) {
+      qPx.classList.remove('tick-up', 'tick-down');
+      void qPx.offsetWidth;
+      qPx.classList.add(s.price > view.quotePx ? 'tick-up' : 'tick-down');
+    }
+    view.quotePx = s.unlocked ? s.price : 0;
     $('qChg').textContent = s.unlocked ? signed(s.pct, 2) + '%  SESSION ' + signed(s.dayPct, 2) + '%' : s.unlockRank;
     $('qChg').className = 'chg ' + clsDelta(s.pct);
     const movers = state.stocks
@@ -414,9 +729,9 @@
     tween.cash += (state.cash - tween.cash) * k;
     tween.equity += (state.equity - tween.equity) * k;
     tween.hold += (state.holdingsValue - tween.hold) * k;
-    $('cash').textContent = fmt(tween.cash);
-    $('holdings').textContent = fmt(tween.hold);
-    $('total').textContent = fmt(tween.equity);
+    $('cash').textContent = money(tween.cash);
+    $('holdings').textContent = money(tween.hold);
+    $('total').textContent = money(tween.equity);
     $('pnl').textContent = signed(state.sessionPct, 2) + '%';
     $('pnl').className = clsDelta(state.sessionPct);
     $('day').textContent = String(state.day);
@@ -556,6 +871,9 @@
     $('sellBtn').disabled = !s.unlocked || closed || (maxSell <= 0 && maxShort <= 0);
     $('shortBtn').disabled = !s.unlocked || closed || maxShort <= 0 || (pos && pos.qty > 0);
     $('coverBtn').disabled = !s.unlocked || closed || maxCover + 1e-9 < (qty > 0 ? Math.min(qty, maxCover) : 0.0001) || maxCover <= 0;
+    $('barMeta').innerHTML = s.unlocked
+      ? '<span><b>' + s.symbol + '</b> ' + money(s.price) + '</span><span>QTY <b>' + (qty || 0) + '</b> · ' + $('orderType').value.toUpperCase() + (pos ? ' · <b class="' + clsDelta(pos.unrealizedCents) + '">' + money(pos.unrealizedCents / 100) + '</b>' : '') + '</span>'
+      : '<span>' + s.symbol + ' LOCKED</span>';
     const needLimit = $('orderType').value !== 'market';
     $('limitPx').disabled = !needLimit;
     if (!needLimit) $('limitPx').value = s.price.toFixed(2);
@@ -566,7 +884,7 @@
       if (ev.type === 'fill') {
         if (ev.side === 'buy') audio.buy();
         else audio.sell();
-        const rect = $('ticket').getBoundingClientRect();
+        const rect = $('tradeBar').getBoundingClientRect();
         burst(rect.left + rect.width / 2, rect.top + 20, ev.side === 'buy' || (ev.side === 'sell' && ev.price));
         const label = ev.openedShort
           ? 'FILL SHORT '
@@ -576,6 +894,7 @@
               ? 'FILL BUY '
               : 'FILL SELL ';
         toast(label + ev.qty + ' ' + ev.symbol);
+        addFillMark(ev);
         chartDirty = true;
       } else if (ev.type === 'news') {
         audio.news();
@@ -604,7 +923,7 @@
     if (!game()) return;
     const state = lastState || game().getState();
     paintStats(state, Math.min(48, ts - lastPaint || 16));
-    if (chartDirty) drawChart(state);
+    if (chartDirty || chartAnimating(ts)) drawChart(state, ts);
     lastPaint = ts;
   }
 
@@ -619,6 +938,7 @@
     fillSelect(state);
     syncTicket();
     if (state.tick % 4 === 0) paintTape(state);
+    noteTick(state);
     chartDirty = true;
     $('pauseBtn').textContent = state.paused ? 'RESUME' : 'PAUSE';
     document.querySelectorAll('[data-speed]').forEach((btn) => {
@@ -801,6 +1121,21 @@
         drawChart(game().getState());
       });
     });
+    $('fillsBtn').addEventListener('click', () => {
+      showFills = !showFills;
+      $('fillsBtn').classList.toggle('active', showFills);
+      $('fillsBtn').setAttribute('aria-pressed', String(showFills));
+      try { localStorage.setItem('tt.fills', showFills ? '1' : '0'); } catch (e) {}
+      chartDirty = true;
+      drawChart(game().getState());
+    });
+    try {
+      if (localStorage.getItem('tt.fills') === '0') {
+        showFills = false;
+        $('fillsBtn').classList.remove('active');
+        $('fillsBtn').setAttribute('aria-pressed', 'false');
+      }
+    } catch (e) {}
     $('emaBtn').addEventListener('click', () => {
       showEma = !showEma;
       $('emaBtn').classList.toggle('active', showEma);
@@ -845,12 +1180,12 @@
       game().cancelOrder(Number(id));
       paintAll(game().getState());
     });
-    $('chart-wrap').addEventListener('mousemove', (e) => {
+    $('chart-wrap').addEventListener('pointermove', (e) => {
       const r = e.currentTarget.getBoundingClientRect();
       hover = { x: e.clientX - r.left, y: e.clientY - r.top };
       chartDirty = true;
     });
-    $('chart-wrap').addEventListener('mouseleave', () => {
+    $('chart-wrap').addEventListener('pointerleave', () => {
       hover = null;
       chartDirty = true;
     });

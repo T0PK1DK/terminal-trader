@@ -1,6 +1,50 @@
 # Handoff
 
-## What shipped (overnight pass on 2.1)
+## What shipped (fill markers pass)
+
+Still **2D**. No deploy. Built on the open UI-polish PR branch (`claude/terminal-trader-ui-polish-oazocn`, PR #3 not merged yet).
+
+- **Trade markers (roadmap item d)** — every fill drops a glyph on the chart at its tick and fill price: **▲ under the print for buys** (up color), **▼ over the print for sells** (down color), with a small letter beside it: `B`, `S`, `SH` (opened short), `CV` (cover). A thin stem plus a dot tie the glyph to the exact price. Several fills on the same slot stack outward instead of overlapping.
+- Works in **LINE and CANDLE** modes, slides with the existing glide (`offset`), drops off the left edge as the ring buffer rolls, and is cleared on reset. Capped at 240 marks in memory.
+- **FILLS toggle** next to EMA20 (`#fillsBtn`, `aria-pressed`, persisted in `localStorage` as `tt.fills`).
+- **Hover tooltip** (`#fillTip`) on a glyph: `SHORT 2 @ $194.88 · T41`, colored by theme tokens.
+- New glyphs pop in over ~360ms; the pop only keeps the chart animating while it runs (`chartAnimating`), and it is skipped under `prefers-reduced-motion`. No new per-tick DOM work; everything is on the existing canvas pass.
+- **Engine bug fixed (found while building this):** `emit('fill', {..., type: order.type})` overwrote the event's `type`, so fill events reached the UI as `type: "market"` / `"limit"`. Fill toasts, buy/sell sounds and the fill burst never fired. The order type now rides as `orderType`. Two new tests cover fill events (tick/price/side/orderType) and short/cover flags. **40/40 green** (was 38).
+
+### Research (pattern copied)
+
+TradingView (executions on chart), Webull and thinkorswim (B/S bubbles at the fill price), Kraken Pro / Binance ("show my trades" on the chart), Robinhood (dots on the line at each buy/sell). The shared pattern: a glyph at the fill price on the fill's bar, buys green pointing up from below, sells red pointing down from above, a toggle to hide them, details on hover. A Mobbin web search returned no chart-with-executions screens, so this is from the apps above.
+
+Differences on purpose:
+- Short / cover get their own letters (`SH` / `CV`); most brokers only say B/S, but shorting is core here.
+- Tooltip on hover only (no tap tooltip on phones yet); the letter beside each glyph carries the key info on touch.
+- Markers are session-only (not saved with the game). Restoring a save shows the chart without old fills.
+
+### Skipped and why
+- Persisting markers across reloads: needs an engine fill history in `serialize`; not worth a save-format change for this pass.
+- Tap-to-inspect on phones: needs a touch hit-test that does not fight chart scroll; next pass.
+
+### What is next
+1. Merge PR #3, then this PR.
+2. Tap-to-inspect fill markers on phones; optional persisted fill history.
+3. CSV export of the audit log; stop-limit ticket type; more contracts.
+
+## Previous pass (UI polish pass)
+
+Still **2D**. No deploy. No engine changes; shorting, EMA20 and the session P&L card behave as before.
+
+- **Sharper terminal look** — HUD corner brackets on panels, hairline stat strip, segmented control groups (speed / theme / desk), JetBrains Mono with monospace fallbacks, tabular numbers, blinking cursor on the mast and boot line.
+- **Smooth chart motion** — each new print glides in over most of the tick interval (the line slides one slot left as the ring buffer rolls), the y-range widens fast and tightens slowly so prints never leave the frame, and a pulsing DOM dot marks the last price. Redraws only while a glide or range ease is in flight (`noteTick` / `chartAnimating` in `src/ui.js`). Respects `prefers-reduced-motion`.
+- **Phone layout** — at ≤640px the controls become one swipeable strip, stats go 3×2, chart then ticket come before the watch list, 16px inputs (no iOS zoom), larger tap targets, toasts drop from the top, hover styles gated behind `(hover: hover)`.
+- **Fixes** — `.news` panel styles leaked onto `.log-entry.news` rows (indented, padded log lines); negative money rendered as `$-12.34` (now `-$12.34`); the FLAT placeholder wrapped inside the positions grid; watch flashes tinted whole rows at 5× (now a price-text pulse).
+- **Design-recon follow-up** (Mobbin research: Fidelity, Stake, Revolut, Wealthsimple, Vivid, Lightyear, Wealthfront, QuestMobile on iOS; Gemini, Binance, OKX, Coinbase, Kraken on web):
+  - Phone pins BUY / SELL / SHORT / COVER to the bottom with a symbol · qty · type · P&L line (every mobile broker sampled pins trade actions; we keep all four because shorting is core).
+  - Chart draws your entry line (LONG/SHORT qty @ avg with live P&L) and a dashed line per working order; off-range levels pin to the edge with ▲/▼. This covers the "trade markers" roadmap item.
+  - O/H/L/C + EMA20 readout top-left (all five web terminals); crosshair price tag sits on the right axis.
+  - Deliberately skipped: edge-to-edge phone chart (keeps the bracketed frame) and Buy/Sell tabs (an extra tap per trade, and it fights B/S/H/C keys).
+- Screenshots in `docs/screenshots/`.
+
+## Previous pass (overnight pass on 2.1)
 
 Still **2D**. No deploy. No secrets. Simulated money only.
 
