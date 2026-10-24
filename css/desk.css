@@ -991,3 +991,20 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   }
   .tape { animation: tape 120s linear infinite !important; }
 }
+
+/* Fill markers tooltip (glyphs themselves are on the canvas) */
+.fill-tip {
+  position: absolute;
+  display: none;
+  transform: translateX(-50%);
+  pointer-events: none;
+  padding: 2px 6px;
+  font: 700 10px var(--font);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  background: var(--bg);
+  border: 1px solid currentColor;
+  z-index: 3;
+}
+.fill-tip.up { color: var(--up); }
+.fill-tip.down { color: var(--down); }

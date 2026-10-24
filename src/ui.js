@@ -13,6 +13,11 @@
   let hover = null;
   let bootDone = false;
   let showEma = true;
+  // Fill markers: one glyph per fill at its tick and price (UI-only; fed from the 'fill' event stream).
+  let showFills = true;
+  const fillMarks = [];
+  const FILL_MARK_CAP = 240;
+  let markTick = -1;
   let fxSized = { w: 0, h: 0, dpr: 1 };
   const cardRefs = new Map();
   const tapeRefs = { built: 0, nodes: [] };
@@ -278,8 +283,98 @@
     view.settled = false;
   }
 
+  function addFillMark(ev) {
+    if (!ev.symbol || !(ev.price > 0)) return;
+    const kind = ev.openedShort ? 'short' : ev.covered ? 'cover' : ev.side === 'buy' ? 'buy' : 'sell';
+    fillMarks.push({ symbol: ev.symbol, tick: ev.tick || 0, price: ev.price, qty: ev.qty, side: ev.side, kind, born: performance.now() });
+    if (fillMarks.length > FILL_MARK_CAP) fillMarks.splice(0, fillMarks.length - FILL_MARK_CAP);
+  }
+
+  const MARK_LETTER = { buy: 'B', sell: 'S', short: 'SH', cover: 'CV' };
+
+  // Shared broker pattern: buys ▲ under the print (green), sells ▼ over it (red), qty letter beside it.
+  function drawFillMarks(ctx, state, stock, geo) {
+    if (state.tick < markTick) fillMarks.length = 0; // new game
+    markTick = state.tick;
+    if (!showFills || !fillMarks.length) return null;
+    const { pad, innerW, yOf, n, offset, candleMode, candleCount, up, down, font, bg, ts, hover } = geo;
+    const placed = [];
+    const stack = {};
+    for (let k = 0; k < fillMarks.length; k++) {
+      const m = fillMarks[k];
+      if (m.symbol !== stock.symbol) continue;
+      const ago = Math.max(0, state.tick - m.tick);
+      let x;
+      if (candleMode) {
+        const ci = candleCount - 1 - Math.floor(ago / 5);
+        if (ci < 0) continue;
+        x = pad.l + (ci + 0.5) * (innerW / candleCount);
+      } else {
+        const i = n - 1 - ago;
+        if (i < 0) continue;
+        x = i === n - 1 ? pad.l + innerW : pad.l + (i / (n - 1)) * innerW + offset;
+      }
+      const isBuy = m.side === 'buy';
+      const key = Math.round(x) + (isBuy ? 'b' : 's');
+      const lane = (stack[key] = (stack[key] || 0) + 1) - 1;
+      const py = yOf(m.price);
+      const dir = isBuy ? 1 : -1;
+      const gy = py + dir * (9 + lane * 13);
+      placed.push({ m, x, py, gy, dir, isBuy });
+    }
+    if (!placed.length) return null;
+    ctx.save();
+    ctx.font = '700 10px ' + font;
+    let near = null;
+    placed.forEach((p) => {
+      const col = p.isBuy ? up : down;
+      const age = ts - p.m.born;
+      const pop = reduceMotion || age > 360 ? 1 : 0.6 + 0.4 * easeOut(Math.max(0, age) / 360);
+      const s = 6 * pop;
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.py);
+      ctx.lineTo(p.x, p.gy - p.dir * s);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(p.x, p.py, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      // ▲ tip points at the price from below; ▼ from above
+      ctx.moveTo(p.x, p.gy - p.dir * s);
+      ctx.lineTo(p.x - s, p.gy + p.dir * s * 0.8);
+      ctx.lineTo(p.x + s, p.gy + p.dir * s * 0.8);
+      ctx.closePath();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = bg;
+      ctx.stroke();
+      ctx.fill();
+      if (p.m.kind === 'short' || p.m.kind === 'cover') {
+        ctx.fillStyle = bg;
+        ctx.fillRect(p.x - 1, p.gy - 1, 2, 2);
+      }
+      const letter = MARK_LETTER[p.m.kind];
+      ctx.fillStyle = col;
+      const lx = p.x + 8;
+      if (lx + 14 < pad.l + innerW + 4) ctx.fillText(letter, lx, p.gy + 3);
+      if (hover && Math.abs(hover.x - p.x) < 8 && Math.abs(hover.y - p.gy) < 12) near = p;
+    });
+    ctx.restore();
+    return near;
+  }
+
+  function fillMarksAnimating(ts) {
+    if (reduceMotion || !showFills) return false;
+    for (let k = fillMarks.length - 1; k >= 0 && k >= fillMarks.length - 4; k--) if (ts - fillMarks[k].born < 380) return true;
+    return false;
+  }
+
   function chartAnimating(ts) {
-    return !view.settled || (view.at && ts - view.at < view.ms);
+    return !view.settled || (view.at && ts - view.at < view.ms) || fillMarksAnimating(ts);
   }
 
   function drawChart(state, now) {
@@ -452,6 +547,10 @@
       ctx.stroke();
       ctx.setLineDash([]);
     }
+    const nearMark = drawFillMarks(ctx, state, stock, {
+      pad, innerW, yOf, n: data.length, offset, candleMode, candleCount: candles.length,
+      up, down, font, bg: style.getPropertyValue('--bg').trim() || '#04110b', ts, hover
+    });
     ctx.restore();
 
     // Entry + working-order lines: price under your short's line reads as winning at a glance.
@@ -491,7 +590,7 @@
       }
       ctx.setLineDash([]);
       ctx.globalAlpha = 1;
-      ctx.font = '700 9px ' + font;
+      ctx.font = '700 10px ' + font;
       const text = (off < 0 ? '▲ ' : off > 0 ? '▼ ' : '') + lv.label;
       const tw = ctx.measureText(text).width;
       const tailW = lv.tail ? ctx.measureText(lv.tail).width + 10 : 0;
@@ -573,8 +672,18 @@
         tag.style.top = yOf(px) + 'px';
         tag.textContent = money(px);
       }
+      const tip = $('fillTip');
+      if (nearMark) {
+        const m = nearMark.m;
+        tip.className = 'fill-tip ' + (nearMark.isBuy ? 'up' : 'down');
+        tip.textContent = m.kind.toUpperCase() + ' ' + m.qty + ' @ ' + money(m.price) + ' · T' + m.tick;
+        tip.style.left = clamp(nearMark.x, 60, w - pad.r - 60) + 'px';
+        tip.style.top = nearMark.gy + (nearMark.isBuy ? 12 : -30) + 'px';
+        tip.style.display = 'block';
+      } else tip.style.display = 'none';
     } else {
       tag.style.display = 'none';
+      $('fillTip').style.display = 'none';
     }
     chartDirty = false;
   }
@@ -785,6 +894,7 @@
               ? 'FILL BUY '
               : 'FILL SELL ';
         toast(label + ev.qty + ' ' + ev.symbol);
+        addFillMark(ev);
         chartDirty = true;
       } else if (ev.type === 'news') {
         audio.news();
@@ -1011,6 +1121,21 @@
         drawChart(game().getState());
       });
     });
+    $('fillsBtn').addEventListener('click', () => {
+      showFills = !showFills;
+      $('fillsBtn').classList.toggle('active', showFills);
+      $('fillsBtn').setAttribute('aria-pressed', String(showFills));
+      try { localStorage.setItem('tt.fills', showFills ? '1' : '0'); } catch (e) {}
+      chartDirty = true;
+      drawChart(game().getState());
+    });
+    try {
+      if (localStorage.getItem('tt.fills') === '0') {
+        showFills = false;
+        $('fillsBtn').classList.remove('active');
+        $('fillsBtn').setAttribute('aria-pressed', 'false');
+      }
+    } catch (e) {}
     $('emaBtn').addEventListener('click', () => {
       showEma = !showEma;
       $('emaBtn').classList.toggle('active', showEma);
